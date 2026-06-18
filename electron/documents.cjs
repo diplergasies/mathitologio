@@ -72,10 +72,21 @@ function findSoffice(resourcesPath, isDev) {
     candidates.push(path.join(devBase, 'program', exe))
     candidates.push(path.join(devBase, exe))
   }
+
+  // Τυπικές διαδρομές εγκατεστημένου LibreOffice ανά λειτουργικό.
+  if (process.platform === 'win32') {
+    candidates.push('C:\\Program Files\\LibreOffice\\program\\soffice.exe')
+    candidates.push('C:\\Program Files (x86)\\LibreOffice\\program\\soffice.exe')
+  } else if (process.platform === 'darwin') {
+    candidates.push('/Applications/LibreOffice.app/Contents/MacOS/soffice')
+  } else {
+    candidates.push('/usr/bin/soffice', '/usr/bin/libreoffice', '/snap/bin/libreoffice')
+  }
+
   for (const c of candidates) {
     if (fs.existsSync(c)) return c
   }
-  // Εφεδρικά: εγκατεστημένο στο σύστημα (PATH).
+  // Εφεδρικά: ό,τι υπάρχει στο PATH.
   return process.platform === 'win32' ? 'soffice.exe' : 'soffice'
 }
 

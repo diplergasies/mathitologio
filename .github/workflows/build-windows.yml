@@ -1,0 +1,46 @@
+name: Build Windows installer
+
+# Τρέχει χειροκίνητα (Actions → Run workflow) ή όταν δημιουργείς tag έκδοσης (π.χ. v0.1.0).
+on:
+  workflow_dispatch:
+  push:
+    tags:
+      - 'v*'
+
+jobs:
+  build:
+    runs-on: windows-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Build Windows installer (.exe)
+        run: npm run dist
+        env:
+          # Αποτρέπει το electron-builder από αυτόματο publish — μόνο build.
+          EP_DRAFT: 'false'
+
+      - name: Upload installer artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: Mathitologio-Windows-Installer
+          path: release/*.exe
+          if-no-files-found: error
+
+      # Σε tag (π.χ. v0.1.0) δημιουργεί GitHub Release με συνημμένο το installer.
+      - name: Create GitHub Release
+        if: startsWith(github.ref, 'refs/tags/')
+        uses: softprops/action-gh-release@v2
+        with:
+          files: release/*.exe
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
