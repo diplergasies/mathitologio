@@ -7,6 +7,9 @@ on:
     tags:
       - 'v*'
 
+permissions:
+  contents: write # απαιτείται για τη δημιουργία Release σε tag
+
 jobs:
   build:
     runs-on: windows-latest
