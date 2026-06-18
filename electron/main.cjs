@@ -99,6 +99,8 @@ function createWindow() {
     minWidth: 900,
     minHeight: 600,
     title: 'Μαθητολόγιο',
+    // Σε dev δείχνουμε το εικονίδιο στο παράθυρο/taskbar· στο packaged το αναλαμβάνει το .exe.
+    ...(isDev ? { icon: path.join(__dirname, '..', 'build', 'icon.png') } : {}),
     webPreferences: {
       preload: path.join(__dirname, 'preload.cjs'),
       contextIsolation: true,
