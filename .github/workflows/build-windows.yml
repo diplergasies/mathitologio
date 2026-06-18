@@ -24,10 +24,8 @@ jobs:
         run: npm ci
 
       - name: Build Windows installer (.exe)
-        run: npm run dist
-        env:
-          # Αποτρέπει το electron-builder από αυτόματο publish — μόνο build.
-          EP_DRAFT: 'false'
+        # --publish never: μόνο build, χωρίς auto-publish (το release το κάνει το επόμενο βήμα σε tag).
+        run: npm run build && npx electron-builder --win --publish never
 
       - name: Upload installer artifact
         uses: actions/upload-artifact@v4
