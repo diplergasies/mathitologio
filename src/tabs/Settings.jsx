@@ -98,12 +98,18 @@ function SchoolYearSection({ bump }) {
 }
 
 export default function Settings({ version, bump }) {
-  const [form, setForm] = useState({ sep: '', nomos: '', domi: '' })
+  const [form, setForm] = useState({ sep: '', nomos: '', domi: '', perif: '' })
   const [saved, setSaved] = useState(false)
 
   useEffect(() => {
     api.getSettings().then((s) => {
-      if (s) setForm({ sep: s.sep || '', nomos: s.nomos || '', domi: s.domi || '' })
+      if (s)
+        setForm({
+          sep: s.sep || '',
+          nomos: s.nomos || '',
+          domi: s.domi || '',
+          perif: s.perif || '',
+        })
     })
   }, [version])
 
@@ -138,11 +144,14 @@ export default function Settings({ version, bump }) {
         </h3>
         <p className="mb-3 text-xs text-slate-400">
           Συντονιστής Εκπαίδευσης Προσφύγων — τα στοιχεία αυτά συμπληρώνονται αυτόματα στα έγγραφα
-          (tokens {'{{ΣΕΠ}}, {{Νομός}}, {{Δομή}}'}).
+          (tokens {'{{ΣΕΠ}}, {{Νομός}}, {{Δομή}}, {{PERIF}}'}).
         </p>
         <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
           {field('sep', 'Ονοματεπώνυμο ΣΕΠ', 'π.χ. Ιωάννης Παπαδόπουλος')}
           {field('nomos', 'Νομός', 'π.χ. Αττικής')}
+          <div className="sm:col-span-2">
+            {field('perif', 'Περιφερειακή Διεύθυνση Εκπαίδευσης', 'π.χ. Αττικής')}
+          </div>
           <div className="sm:col-span-2">{field('domi', 'Δομή φιλοξενίας', 'π.χ. ΚΥΤ / Δομή ...')}</div>
         </div>
         <div className="mt-3 flex items-center gap-3">

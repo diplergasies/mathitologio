@@ -58,6 +58,22 @@ function fillTemplate(templatePath, data, outDir) {
   return outPath
 }
 
+// Εξάγει το σύνολο των tokens (χωρίς {{ }}) που υπάρχουν σε ένα template.
+function extractTokens(templatePath) {
+  const ext = path.extname(templatePath).toLowerCase()
+  const zip = new PizZip(fs.readFileSync(templatePath))
+  const pattern = targetXmlPattern(ext)
+  const set = new Set()
+  Object.keys(zip.files)
+    .filter((name) => pattern.test(name))
+    .forEach((name) => {
+      // Αφαίρεση tags ώστε να ενωθούν tokens σπασμένα σε πολλά runs.
+      const text = zip.file(name).asText().replace(/<[^>]+>/g, '')
+      ;(text.match(/\{\{[^}]+\}\}/g) || []).forEach((t) => set.add(t.replace(/[{}]/g, '').trim()))
+    })
+  return [...set]
+}
+
 // Εντοπισμός εκτελέσιμου LibreOffice (bundled ή συστήματος).
 function findSoffice(resourcesPath, isDev) {
   const candidates = []
@@ -130,4 +146,4 @@ function generate({ templatePath, data, resourcesPath, isDev }) {
   return convertToPdf(filled, tmpDir, soffice)
 }
 
-module.exports = { fillTemplate, convertToPdf, findSoffice, generate, xmlEscape }
+module.exports = { fillTemplate, convertToPdf, findSoffice, generate, xmlEscape, extractTokens }

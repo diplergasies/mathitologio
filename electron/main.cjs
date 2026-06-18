@@ -52,6 +52,7 @@ function buildDocData(s, cfg) {
     'Μητρώνυμο': s.mitronymo,
     'ΔΙΚΑ': s.dika,
     'Φύλο': s.fylo,
+    'ΦΥΛΟ': s.fylo,
     'Γλώσσα': s.glossa,
     'Ιθαγένεια': s.ithageneia,
     'ΗμΓεν': s.imerominia_gennisis,
@@ -61,12 +62,33 @@ function buildDocData(s, cfg) {
     'Σχολείο': s.school_name || '',
     'Τύπος': s.school_type || '',
     'Τάξη': s.current_grade || s.computed_grade || '',
+    'TAXI': s.current_grade || s.computed_grade || '',
     'Επίτροπος': s.epitropos,
     'ΣΕΠ': cfg.sep || '',
     'Νομός': cfg.nomos || '',
     'Δομή': cfg.domi || '',
+    'PERIF': cfg.perif || '',
     'DATE': todayDisplay(),
     'Ημερομηνία': todayDisplay(),
+  }
+}
+
+// Υπολογισμός υπογράφοντα ({{signee}}, {{signee.prop}}) βάσει της επιλογής του χρήστη.
+// choice: { type: 'father'|'mother'|'sep'|'other', name?, prop? }
+function computeSignee(s, cfg, choice) {
+  const surname = s.eponymo || ''
+  if (!choice) return { signee: '', prop: '' }
+  switch (choice.type) {
+    case 'father':
+      return { signee: `${s.patronymo || ''} ${surname}`.trim(), prop: 'πατέρας' }
+    case 'mother':
+      return { signee: `${s.mitronymo || ''} ${surname}`.trim(), prop: 'μητέρα' }
+    case 'sep':
+      return { signee: cfg.sep || '', prop: 'ΣΕΠ' }
+    case 'other':
+      return { signee: choice.name || '', prop: choice.prop || '' }
+    default:
+      return { signee: '', prop: '' }
   }
 }
 
@@ -372,7 +394,7 @@ ipcMain.handle('students:bulkEnroll', (_e, { ids = [], mode, schoolId }) => {
   return { ok: true, enrolled, needSchool, skipped }
 })
 
-ipcMain.handle('documents:bulkGenerate', async (_e, { ids = [], templateFiles = [] }) => {
+ipcMain.handle('documents:bulkGenerate', async (_e, { ids = [], templateFiles = [], signee }) => {
   if (!templateFiles.length) return { error: 'Δεν επιλέχθηκαν templates' }
   const { canceled, filePaths } = await dialog.showOpenDialog({
     title: 'Επιλογή φακέλου αποθήκευσης εγγράφων',
@@ -392,6 +414,11 @@ ipcMain.handle('documents:bulkGenerate', async (_e, { ids = [], templateFiles = 
     if (!rows.length) continue
     const s = rows[0]
     const data = buildDocData(s, cfg)
+    if (signee) {
+      const sg = computeSignee(s, cfg, signee)
+      data['signee'] = sg.signee
+      data['signee.prop'] = sg.prop
+    }
     for (const tf of templateFiles) {
       const templatePath = path.join(templatesDir(), tf)
       if (!fs.existsSync(templatePath)) {
@@ -475,10 +502,22 @@ ipcMain.handle('documents:list', () => {
   return fs
     .readdirSync(dir)
     .filter((f) => /\.(pptx|docx)$/i.test(f))
-    .map((f) => ({ file: f, label: f.replace(/\.(pptx|docx)$/i, '') }))
+    .map((f) => {
+      let tokens = []
+      try {
+        tokens = documents.extractTokens(path.join(dir, f))
+      } catch {
+        tokens = []
+      }
+      return {
+        file: f,
+        label: f.replace(/\.(pptx|docx)$/i, ''),
+        needsSignee: tokens.includes('signee') || tokens.includes('signee.prop'),
+      }
+    })
 })
 
-ipcMain.handle('documents:generate', async (_e, { id, templateFile }) => {
+ipcMain.handle('documents:generate', async (_e, { id, templateFile, signee }) => {
   const rows = db.query(
     `SELECT s.*, sc.name AS school_name, sc.type AS school_type
        FROM students s LEFT JOIN schools sc ON sc.id = s.school_id
@@ -493,6 +532,11 @@ ipcMain.handle('documents:generate', async (_e, { id, templateFile }) => {
 
   const cfg = db.getAllSettings()
   const data = buildDocData(s, cfg)
+  if (signee) {
+    const sg = computeSignee(s, cfg, signee)
+    data['signee'] = sg.signee
+    data['signee.prop'] = sg.prop
+  }
 
   let pdfPath
   try {

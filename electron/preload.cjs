@@ -28,8 +28,8 @@ contextBridge.exposeInMainWorld('api', {
   setSchoolYear: (nipYear) => ipcRenderer.invoke('schoolYear:set', nipYear),
 
   listTemplates: () => ipcRenderer.invoke('documents:list'),
-  generateDocument: (id, templateFile) =>
-    ipcRenderer.invoke('documents:generate', { id, templateFile }),
+  generateDocument: (id, templateFile, signee) =>
+    ipcRenderer.invoke('documents:generate', { id, templateFile, signee }),
 
   bulkDelete: (ids) => ipcRenderer.invoke('students:bulkDelete', ids),
   bulkRestore: (ids) => ipcRenderer.invoke('students:bulkRestore', ids),
@@ -37,8 +37,8 @@ contextBridge.exposeInMainWorld('api', {
   bulkPurge: (ids) => ipcRenderer.invoke('students:bulkPurge', ids),
   bulkEnroll: (ids, mode, schoolId) =>
     ipcRenderer.invoke('students:bulkEnroll', { ids, mode, schoolId }),
-  bulkGenerate: (ids, templateFiles) =>
-    ipcRenderer.invoke('documents:bulkGenerate', { ids, templateFiles }),
+  bulkGenerate: (ids, templateFiles, signee) =>
+    ipcRenderer.invoke('documents:bulkGenerate', { ids, templateFiles, signee }),
 
   exportBackup: () => ipcRenderer.invoke('backup:export'),
   importBackup: () => ipcRenderer.invoke('backup:import'),

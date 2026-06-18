@@ -68,7 +68,9 @@ export default function App() {
           <div>
             <h1 className="text-lg font-bold leading-tight text-slate-800">Μαθητολόγιο</h1>
             {info && (
-              <p className="text-xs text-slate-400">Σχολικό έτος {info.schoolYearLabel}</p>
+              <p className="text-xs text-slate-400">
+                Σχολικό έτος {info.schoolYearLabel} · έκδοση {info.version}
+              </p>
             )}
           </div>
         </div>
