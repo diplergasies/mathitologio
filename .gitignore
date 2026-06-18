@@ -1,0 +1,13 @@
+node_modules/
+dist/
+release/
+resources/libreoffice/*
+!resources/libreoffice/.gitkeep
+
+# ΕΥΑΙΣΘΗΤΑ ΔΕΔΟΜΕΝΑ — ΜΗΝ ΑΝΕΒΑΙΝΟΥΝ ΠΟΤΕ στο GitHub
+# (πραγματικές λίστες πληθυσμού με προσωπικά δεδομένα ανηλίκων)
+samples/
+*.sqlite
+
+*.log
+.DS_Store

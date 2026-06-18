@@ -1,0 +1,44 @@
+@import "tailwindcss";
+
+:root {
+  font-family: system-ui, "Segoe UI", Roboto, Arial, sans-serif;
+}
+
+html, body, #root {
+  height: 100%;
+  margin: 0;
+}
+
+body {
+  background: #f5f6f8;
+  color: #1f2430;
+  -webkit-user-select: none;
+  user-select: none;
+}
+
+/* Επιτρέπουμε επιλογή κειμένου μέσα σε πεδία/πίνακες */
+input, textarea, td, th, [data-selectable] {
+  -webkit-user-select: text;
+  user-select: text;
+}
+
+/* Styling για το rendered markdown (Βοήθεια) */
+.md-body { color: #334155; line-height: 1.6; font-size: 14px; }
+.md-body h1 { font-size: 1.6rem; font-weight: 700; margin: 0.6em 0 0.4em; color: #1e293b; }
+.md-body h2 { font-size: 1.25rem; font-weight: 700; margin: 1.1em 0 0.4em; color: #1e293b; border-bottom: 1px solid #e2e8f0; padding-bottom: 0.2em; }
+.md-body h3 { font-size: 1.05rem; font-weight: 600; margin: 0.9em 0 0.3em; color: #334155; }
+.md-body p { margin: 0.5em 0; }
+.md-body ul, .md-body ol { margin: 0.5em 0; padding-left: 1.5em; }
+.md-body li { margin: 0.2em 0; }
+.md-body ul { list-style: disc; }
+.md-body ol { list-style: decimal; }
+.md-body a { color: #2563eb; text-decoration: underline; }
+.md-body strong { font-weight: 700; color: #1e293b; }
+.md-body code { background: #f1f5f9; padding: 0.1em 0.35em; border-radius: 4px; font-family: ui-monospace, monospace; font-size: 0.88em; }
+.md-body pre { background: #0f172a; color: #e2e8f0; padding: 0.8em 1em; border-radius: 8px; overflow-x: auto; margin: 0.6em 0; }
+.md-body pre code { background: transparent; color: inherit; padding: 0; }
+.md-body table { border-collapse: collapse; width: 100%; margin: 0.6em 0; font-size: 0.9em; }
+.md-body th, .md-body td { border: 1px solid #e2e8f0; padding: 0.4em 0.6em; text-align: left; }
+.md-body th { background: #f8fafc; font-weight: 600; }
+.md-body blockquote { border-left: 3px solid #cbd5e1; padding-left: 0.8em; color: #64748b; margin: 0.6em 0; }
+.md-body hr { border: 0; border-top: 1px solid #e2e8f0; margin: 1em 0; }

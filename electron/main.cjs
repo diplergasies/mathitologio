@@ -1,0 +1,561 @@
+'use strict'
+
+const { app, BrowserWindow, ipcMain, dialog, shell } = require('electron')
+const fs = require('fs')
+const path = require('path')
+
+const db = require('./db.cjs')
+const grades = require('./grades.cjs')
+const importer = require('./importer.cjs')
+const documents = require('./documents.cjs')
+
+const isDev = !!process.env.VITE_DEV_SERVER_URL
+
+// Απενεργοποίηση επιτάχυνσης υλικού: η εφαρμογή δεν είναι γραφικά απαιτητική και έτσι
+// αποφεύγονται προβλήματα GPU driver σε ποικίλα μηχανήματα (και headless περιβάλλοντα).
+app.disableHardwareAcceleration()
+
+// Παλέτα απαλών αποχρώσεων ανά batch (κυκλική) — αναφορά· η απόδοση γίνεται στο renderer.
+const BATCH_COLOR_COUNT = 8
+
+function resourcesDir() {
+  return isDev ? path.join(__dirname, '..', 'resources') : process.resourcesPath
+}
+
+function templatesDir() {
+  return isDev
+    ? path.join(__dirname, '..', 'resources', 'templates')
+    : path.join(process.resourcesPath, 'templates')
+}
+
+function nowIso() {
+  return new Date().toISOString()
+}
+
+function todayDisplay() {
+  const d = new Date()
+  return `${String(d.getDate()).padStart(2, '0')}/${String(d.getMonth() + 1).padStart(2, '0')}/${d.getFullYear()}`
+}
+
+// Έτος έναρξης σχολικού έτους: από τις Ρυθμίσεις (αν οριστεί) αλλιώς αυτόματο από την ημερομηνία.
+function getSchoolYearStart() {
+  const v = db.getAllSettings().schoolYearStart
+  return v ? Number(v) : grades.currentSchoolYearStart()
+}
+
+// Δημιουργεί το dictionary tokens για ένα μαθητή (κοινό σε ατομική & μαζική έκδοση).
+function buildDocData(s, cfg) {
+  return {
+    'Όνομα': s.onoma,
+    'Επώνυμο': s.eponymo,
+    'Πατρώνυμο': s.patronymo,
+    'Μητρώνυμο': s.mitronymo,
+    'ΔΙΚΑ': s.dika,
+    'Φύλο': s.fylo,
+    'Γλώσσα': s.glossa,
+    'Ιθαγένεια': s.ithageneia,
+    'ΗμΓεν': s.imerominia_gennisis,
+    'Ημερομηνία γέννησης': s.imerominia_gennisis,
+    'ΗμΑφιξης': s.imerominia_afixis,
+    'Μονάδα': s.monada,
+    'Σχολείο': s.school_name || '',
+    'Τύπος': s.school_type || '',
+    'Τάξη': s.current_grade || s.computed_grade || '',
+    'Επίτροπος': s.epitropos,
+    'ΣΕΠ': cfg.sep || '',
+    'Νομός': cfg.nomos || '',
+    'Δομή': cfg.domi || '',
+    'DATE': todayDisplay(),
+    'Ημερομηνία': todayDisplay(),
+  }
+}
+
+function createWindow() {
+  const win = new BrowserWindow({
+    width: 1280,
+    height: 820,
+    minWidth: 900,
+    minHeight: 600,
+    title: 'Μαθητολόγιο',
+    webPreferences: {
+      preload: path.join(__dirname, 'preload.cjs'),
+      contextIsolation: true,
+      nodeIntegration: false,
+    },
+  })
+
+  win.setMenuBarVisibility(false)
+
+  if (isDev) {
+    win.loadURL(process.env.VITE_DEV_SERVER_URL)
+  } else {
+    win.loadFile(path.join(__dirname, '..', 'dist', 'index.html'))
+  }
+}
+
+// ---------------------------------------------------------------- IPC handlers
+
+ipcMain.handle('app:info', () => {
+  const S = getSchoolYearStart()
+  return {
+    version: app.getVersion(),
+    schoolYearStart: S,
+    schoolYearLabel: grades.schoolYearLabel(S),
+  }
+})
+
+// Πίνακας τύπων σχολείου + ρυθμιζόμενο έτος Νηπιαγωγείου.
+ipcMain.handle('schoolYear:get', () => {
+  const S = getSchoolYearStart()
+  return {
+    schoolYearStart: S,
+    schoolYearLabel: grades.schoolYearLabel(S),
+    nipYear: grades.nipiagogeioYear(S),
+    table: grades.gradeTable(S),
+  }
+})
+
+ipcMain.handle('schoolYear:set', (_e, nipYear) => {
+  const S = grades.schoolYearStartFromNip(nipYear)
+  if (!Number.isFinite(S) || S < 2000 || S > 2100) return { error: 'Μη έγκυρο έτος' }
+  db.setSettings({ schoolYearStart: String(S) })
+  return { ok: true, schoolYearStart: S, table: grades.gradeTable(S) }
+})
+
+ipcMain.handle('import:xlsx', async () => {
+  const { canceled, filePaths } = await dialog.showOpenDialog({
+    title: 'Επιλογή αρχείου μαθητών',
+    properties: ['openFile'],
+    filters: [{ name: 'Φύλλα εργασίας', extensions: ['xlsx', 'xls'] }],
+  })
+  if (canceled || !filePaths.length) return { canceled: true }
+
+  const filePath = filePaths[0]
+  const { records, missingFields, totalRows } = importer.parseFile(filePath)
+
+  const syStart = getSchoolYearStart()
+  const syLabel = grades.schoolYearLabel(syStart)
+
+  // Πλήθος υπαρχόντων batch -> color_index (κυκλικά).
+  const cnt = db.query('SELECT COUNT(*) AS c FROM batches')[0].c
+  const colorIndex = cnt % BATCH_COLOR_COUNT
+
+  const batchId = db.run(
+    `INSERT INTO batches (imported_at, source_filename, school_year, color_index)
+     VALUES ($a, $f, $y, $c)`,
+    { $a: nowIso(), $f: path.basename(filePath), $y: syLabel, $c: colorIndex }
+  )
+
+  const afixis = todayDisplay()
+  let imported = 0
+  let excluded = 0
+
+  let skipped = 0
+  for (const r of records) {
+    // Παράλειψη κενών/άκυρων γραμμών (χωρίς όνομα, επώνυμο και ΔΙΚΑ).
+    if (!r.eponymo && !r.onoma && !r.dika) {
+      skipped++
+      continue
+    }
+    const cls = r.birth_year != null ? grades.classify(r.birth_year, syStart) : null
+    if (!cls) {
+      excluded++
+      continue
+    }
+    db.run(
+      `INSERT INTO students
+        (batch_id, monada, dika, onoma, eponymo, patronymo, mitronymo, fylo, glossa,
+         ithageneia, imerominia_gennisis, birth_year, imerominia_afixis, epitropos,
+         computed_type, computed_grade, status, created_at, updated_at)
+       VALUES
+        ($batch, $monada, $dika, $onoma, $eponymo, $patronymo, $mitronymo, $fylo, $glossa,
+         $ithageneia, $imgen, $byear, $afixis, 'Όχι',
+         $ctype, $cgrade, 'arrival', $now, $now)`,
+      {
+        $batch: batchId,
+        $monada: r.monada,
+        $dika: r.dika,
+        $onoma: r.onoma,
+        $eponymo: r.eponymo,
+        $patronymo: r.patronymo,
+        $mitronymo: r.mitronymo,
+        $fylo: r.fylo,
+        $glossa: r.glossa,
+        $ithageneia: r.ithageneia,
+        $imgen: r.imerominia_gennisis,
+        $byear: r.birth_year,
+        $afixis: afixis,
+        $ctype: cls.category,
+        $cgrade: cls.grade,
+        $now: nowIso(),
+      }
+    )
+    imported++
+  }
+
+  return { canceled: false, imported, excluded, totalRows, missingFields, batchId }
+})
+
+function studentsByStatus(status) {
+  return db.query(
+    `SELECT s.*, b.color_index AS batch_color, b.school_year AS batch_year,
+            b.imported_at AS batch_imported_at, sc.name AS school_name, sc.type AS school_type
+       FROM students s
+       LEFT JOIN batches b ON b.id = s.batch_id
+       LEFT JOIN schools sc ON sc.id = s.school_id
+      WHERE s.status = $st
+      ORDER BY s.batch_id DESC, s.eponymo COLLATE NOCASE, s.onoma COLLATE NOCASE`,
+    { $st: status }
+  )
+}
+
+ipcMain.handle('students:list', (_e, status) => studentsByStatus(status))
+
+ipcMain.handle('students:enrollOptions', (_e, id) => {
+  const rows = db.query('SELECT * FROM students WHERE id = $id', { $id: id })
+  if (!rows.length) return { error: 'Δεν βρέθηκε ο μαθητής' }
+  const s = rows[0]
+  const cls = grades.classify(s.birth_year, getSchoolYearStart())
+  if (!cls) return { error: 'Ο μαθητής είναι εκτός σχολικής ηλικίας' }
+
+  const placeholders = cls.eligibleTypes.map((_t, i) => `$t${i}`).join(',')
+  const params = {}
+  cls.eligibleTypes.forEach((t, i) => (params[`$t${i}`] = t))
+  const schools = db.query(
+    `SELECT * FROM schools WHERE type IN (${placeholders}) ORDER BY type, name COLLATE NOCASE`,
+    params
+  )
+  return { computed_grade: cls.grade, eligibleTypes: cls.eligibleTypes, schools }
+})
+
+ipcMain.handle('students:enroll', (_e, { id, schoolId }) => {
+  const rows = db.query('SELECT * FROM students WHERE id = $id', { $id: id })
+  if (!rows.length) return { error: 'Δεν βρέθηκε ο μαθητής' }
+  const s = rows[0]
+  const cls = grades.classify(s.birth_year, getSchoolYearStart())
+  const grade = cls ? cls.grade : s.computed_grade
+
+  // Αν δεν δόθηκε σχολείο, auto-ανάθεση ΜΟΝΟ αν υπάρχει ακριβώς ένα κατάλληλο· αλλιώς κενό
+  // (ο χρήστης θα επιλέξει αργότερα από την καρτέλα Μαθητές).
+  let assigned = schoolId != null ? schoolId : null
+  if (assigned == null && cls) {
+    const ph = cls.eligibleTypes.map((_t, i) => `$t${i}`).join(',')
+    const params = {}
+    cls.eligibleTypes.forEach((t, i) => (params[`$t${i}`] = t))
+    const matches = db.query(`SELECT id FROM schools WHERE type IN (${ph})`, params)
+    if (matches.length === 1) assigned = matches[0].id
+  }
+
+  db.run(
+    `UPDATE students
+        SET status='enrolled', prev_status=status, school_id=$sid,
+            current_grade=$g, updated_at=$now
+      WHERE id=$id`,
+    { $sid: assigned, $g: grade, $now: nowIso(), $id: id }
+  )
+  return { ok: true, schoolAssigned: assigned != null }
+})
+
+// Ανάθεση/αλλαγή σχολείου σε εγγεγραμμένο μαθητή (από την καρτέλα Μαθητές).
+ipcMain.handle('students:setSchool', (_e, { id, schoolId }) => {
+  db.run('UPDATE students SET school_id=$sid, updated_at=$now WHERE id=$id', {
+    $sid: schoolId != null ? schoolId : null,
+    $now: nowIso(),
+    $id: id,
+  })
+  return { ok: true }
+})
+
+ipcMain.handle('students:delete', (_e, id) => {
+  db.run(
+    `UPDATE students SET prev_status=status, status='deleted', deleted_at=$now, updated_at=$now WHERE id=$id`,
+    { $now: nowIso(), $id: id }
+  )
+  return { ok: true }
+})
+
+ipcMain.handle('students:restore', (_e, id) => {
+  const rows = db.query('SELECT prev_status FROM students WHERE id=$id', { $id: id })
+  const prev = rows.length && rows[0].prev_status ? rows[0].prev_status : 'arrival'
+  db.run(
+    `UPDATE students SET status=$prev, prev_status=NULL, deleted_at=NULL, updated_at=$now WHERE id=$id`,
+    { $prev: prev, $now: nowIso(), $id: id }
+  )
+  return { ok: true, status: prev }
+})
+
+ipcMain.handle('students:update', (_e, { id, fields }) => {
+  const sets = []
+  const params = { $id: id, $now: nowIso() }
+  if (fields.current_grade !== undefined) {
+    sets.push('current_grade=$g')
+    params.$g = fields.current_grade
+  }
+  if (fields.epitropos !== undefined) {
+    sets.push('epitropos=$ep')
+    params.$ep = fields.epitropos
+  }
+  if (!sets.length) return { ok: true }
+  db.run(`UPDATE students SET ${sets.join(', ')}, updated_at=$now WHERE id=$id`, params)
+  return { ok: true }
+})
+
+// ---- Μαζικές ενέργειες ----------------------------------------------------
+
+ipcMain.handle('students:bulkDelete', (_e, ids = []) => {
+  ids.forEach((id) =>
+    db.run(
+      `UPDATE students SET prev_status=status, status='deleted', deleted_at=$now, updated_at=$now WHERE id=$id`,
+      { $now: nowIso(), $id: id }
+    )
+  )
+  return { ok: true, count: ids.length }
+})
+
+ipcMain.handle('students:bulkRestore', (_e, ids = []) => {
+  ids.forEach((id) => {
+    const rows = db.query('SELECT prev_status FROM students WHERE id=$id', { $id: id })
+    const prev = rows.length && rows[0].prev_status ? rows[0].prev_status : 'arrival'
+    db.run(
+      `UPDATE students SET status=$p, prev_status=NULL, deleted_at=NULL, updated_at=$now WHERE id=$id`,
+      { $p: prev, $now: nowIso(), $id: id }
+    )
+  })
+  return { ok: true, count: ids.length }
+})
+
+// Οριστική (μη αναστρέψιμη) διαγραφή από τη βάση.
+ipcMain.handle('students:purge', (_e, id) => {
+  db.run('DELETE FROM students WHERE id=$id', { $id: id })
+  return { ok: true }
+})
+
+ipcMain.handle('students:bulkPurge', (_e, ids = []) => {
+  ids.forEach((id) => db.run('DELETE FROM students WHERE id=$id', { $id: id }))
+  return { ok: true, count: ids.length }
+})
+
+// mode: 'auto' (μοναδικό σχολείο του τύπου) ή 'school' (συγκεκριμένο schoolId).
+ipcMain.handle('students:bulkEnroll', (_e, { ids = [], mode, schoolId }) => {
+  const syStart = getSchoolYearStart()
+  const allSchools = db.query('SELECT * FROM schools')
+  let enrolled = 0 // εγγράφηκαν με σχολείο
+  let needSchool = 0 // εγγράφηκαν αλλά χωρίς σχολείο (επιλογή αργότερα)
+  const skipped = []
+  for (const id of ids) {
+    const rows = db.query('SELECT * FROM students WHERE id=$id', { $id: id })
+    if (!rows.length) continue
+    const s = rows[0]
+    const cls = grades.classify(s.birth_year, syStart)
+    if (!cls) {
+      skipped.push(`${s.eponymo} ${s.onoma} — εκτός σχολικής ηλικίας`)
+      continue
+    }
+    let target = null
+    if (mode === 'school') {
+      const sc = allSchools.find((x) => x.id === schoolId)
+      if (sc && cls.eligibleTypes.includes(sc.type)) target = sc
+      // ασύμβατος τύπος -> εγγράφεται με κενό σχολείο
+    } else {
+      const matches = allSchools.filter((x) => cls.eligibleTypes.includes(x.type))
+      if (matches.length === 1) target = matches[0]
+      // 0 ή >1 -> εγγράφεται με κενό σχολείο
+    }
+    db.run(
+      `UPDATE students SET status='enrolled', prev_status=status, school_id=$sid,
+              current_grade=$g, updated_at=$now WHERE id=$id`,
+      { $sid: target ? target.id : null, $g: cls.grade, $now: nowIso(), $id: id }
+    )
+    if (target) enrolled++
+    else needSchool++
+  }
+  return { ok: true, enrolled, needSchool, skipped }
+})
+
+ipcMain.handle('documents:bulkGenerate', async (_e, { ids = [], templateFiles = [] }) => {
+  if (!templateFiles.length) return { error: 'Δεν επιλέχθηκαν templates' }
+  const { canceled, filePaths } = await dialog.showOpenDialog({
+    title: 'Επιλογή φακέλου αποθήκευσης εγγράφων',
+    properties: ['openDirectory', 'createDirectory'],
+  })
+  if (canceled || !filePaths.length) return { canceled: true }
+  const outDir = filePaths[0]
+  const cfg = db.getAllSettings()
+  let generated = 0
+  const failed = []
+  for (const id of ids) {
+    const rows = db.query(
+      `SELECT s.*, sc.name AS school_name, sc.type AS school_type
+         FROM students s LEFT JOIN schools sc ON sc.id = s.school_id WHERE s.id=$id`,
+      { $id: id }
+    )
+    if (!rows.length) continue
+    const s = rows[0]
+    const data = buildDocData(s, cfg)
+    for (const tf of templateFiles) {
+      const templatePath = path.join(templatesDir(), tf)
+      if (!fs.existsSync(templatePath)) {
+        failed.push(`${tf} (λείπει)`)
+        continue
+      }
+      try {
+        const pdf = documents.generate({
+          templatePath,
+          data,
+          resourcesPath: isDev ? null : process.resourcesPath,
+          isDev,
+        })
+        const safe = `${s.eponymo}_${s.onoma}_${tf.replace(/\.(pptx|docx)$/i, '')}.pdf`.replace(
+          /[\\/:*?"<>|\s]+/g,
+          '_'
+        )
+        fs.copyFileSync(pdf, path.join(outDir, safe))
+        generated++
+      } catch (err) {
+        failed.push(`${s.eponymo} ${s.onoma} / ${tf}: ${err.message}`)
+      }
+    }
+  }
+  return { ok: true, generated, failed, outDir }
+})
+
+ipcMain.handle('schools:list', () =>
+  db.query('SELECT * FROM schools ORDER BY type, name COLLATE NOCASE')
+)
+
+ipcMain.handle('schools:add', (_e, { name, type }) => {
+  if (!name || !type) return { error: 'Συμπλήρωσε όνομα και τύπο' }
+  if (!grades.SCHOOL_TYPES.includes(type)) return { error: 'Μη έγκυρος τύπος σχολείου' }
+  const id = db.run('INSERT INTO schools (name, type) VALUES ($n, $t)', { $n: name, $t: type })
+  return { ok: true, id }
+})
+
+ipcMain.handle('schools:delete', (_e, id) => {
+  const used = db.query(
+    `SELECT COUNT(*) AS c FROM students WHERE school_id=$id AND status='enrolled'`,
+    { $id: id }
+  )[0].c
+  if (used > 0) {
+    return { error: `Δεν διαγράφεται: ${used} εγγεγραμμένοι μαθητές σε αυτό το σχολείο.` }
+  }
+  db.run('DELETE FROM schools WHERE id=$id', { $id: id })
+  return { ok: true }
+})
+
+ipcMain.handle('schools:update', (_e, { id, name, type }) => {
+  if (!name || !type) return { error: 'Συμπλήρωσε όνομα και τύπο' }
+  if (!grades.SCHOOL_TYPES.includes(type)) return { error: 'Μη έγκυρος τύπος σχολείου' }
+  db.run('UPDATE schools SET name=$n, type=$t WHERE id=$id', { $n: name, $t: type, $id: id })
+  return { ok: true }
+})
+
+ipcMain.handle('grades:forType', (_e, type) => grades.gradesForType(type))
+
+ipcMain.handle('help:readme', () => {
+  const p = isDev
+    ? path.join(__dirname, '..', 'README.md')
+    : path.join(process.resourcesPath, 'README.md')
+  try {
+    return fs.readFileSync(p, 'utf8')
+  } catch {
+    return '# Βοήθεια\n\nΔεν βρέθηκε το αρχείο README.'
+  }
+})
+
+ipcMain.handle('settings:get', () => db.getAllSettings())
+
+ipcMain.handle('settings:set', (_e, obj) => {
+  db.setSettings(obj || {})
+  return { ok: true }
+})
+
+ipcMain.handle('documents:list', () => {
+  const dir = templatesDir()
+  if (!fs.existsSync(dir)) return []
+  return fs
+    .readdirSync(dir)
+    .filter((f) => /\.(pptx|docx)$/i.test(f))
+    .map((f) => ({ file: f, label: f.replace(/\.(pptx|docx)$/i, '') }))
+})
+
+ipcMain.handle('documents:generate', async (_e, { id, templateFile }) => {
+  const rows = db.query(
+    `SELECT s.*, sc.name AS school_name, sc.type AS school_type
+       FROM students s LEFT JOIN schools sc ON sc.id = s.school_id
+      WHERE s.id=$id`,
+    { $id: id }
+  )
+  if (!rows.length) return { error: 'Δεν βρέθηκε ο μαθητής' }
+  const s = rows[0]
+
+  const templatePath = path.join(templatesDir(), templateFile)
+  if (!fs.existsSync(templatePath)) return { error: 'Δεν βρέθηκε το template' }
+
+  const cfg = db.getAllSettings()
+  const data = buildDocData(s, cfg)
+
+  let pdfPath
+  try {
+    pdfPath = documents.generate({
+      templatePath,
+      data,
+      resourcesPath: isDev ? null : process.resourcesPath,
+      isDev,
+    })
+  } catch (err) {
+    return { error: err.message }
+  }
+
+  const suggested = `${s.eponymo}_${s.onoma}_${templateFile.replace(/\.(pptx|docx)$/i, '')}.pdf`.replace(
+    /[\\/:*?"<>|\s]+/g,
+    '_'
+  )
+  const { canceled, filePath } = await dialog.showSaveDialog({
+    title: 'Αποθήκευση εγγράφου',
+    defaultPath: suggested,
+    filters: [{ name: 'PDF', extensions: ['pdf'] }],
+  })
+  if (canceled || !filePath) return { canceled: true }
+  fs.copyFileSync(pdfPath, filePath)
+  // Εμφάνιση στον explorer/finder (ΧΩΡΙΣ να ανοίξει το LibreOffice).
+  shell.showItemInFolder(filePath)
+  return { ok: true, path: filePath }
+})
+
+ipcMain.handle('backup:export', async () => {
+  const src = db.getDbPath()
+  const { canceled, filePath } = await dialog.showSaveDialog({
+    title: 'Εξαγωγή αντιγράφου ασφαλείας',
+    defaultPath: `mathitologio_backup_${Date.now()}.sqlite`,
+    filters: [{ name: 'Βάση δεδομένων', extensions: ['sqlite'] }],
+  })
+  if (canceled || !filePath) return { canceled: true }
+  fs.copyFileSync(src, filePath)
+  return { ok: true, path: filePath }
+})
+
+ipcMain.handle('backup:import', async () => {
+  const { canceled, filePaths } = await dialog.showOpenDialog({
+    title: 'Επαναφορά από αντίγραφο ασφαλείας',
+    properties: ['openFile'],
+    filters: [{ name: 'Βάση δεδομένων', extensions: ['sqlite'] }],
+  })
+  if (canceled || !filePaths.length) return { canceled: true }
+  const buf = fs.readFileSync(filePaths[0])
+  db.replaceFromBuffer(buf)
+  return { ok: true }
+})
+
+// ---------------------------------------------------------------- App lifecycle
+
+app.whenReady().then(async () => {
+  await db.init(app.getPath('userData'))
+  createWindow()
+  app.on('activate', () => {
+    if (BrowserWindow.getAllWindows().length === 0) createWindow()
+  })
+})
+
+app.on('window-all-closed', () => {
+  if (process.platform !== 'darwin') app.quit()
+})
