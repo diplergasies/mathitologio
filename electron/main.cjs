@@ -99,6 +99,7 @@ function createWindow() {
     minWidth: 900,
     minHeight: 600,
     title: 'Μαθητολόγιο',
+    show: false, // εμφανίζεται μεγιστοποιημένο όταν είναι έτοιμο (χωρίς αναβόσβημα)
     // Σε dev δείχνουμε το εικονίδιο στο παράθυρο/taskbar· στο packaged το αναλαμβάνει το .exe.
     ...(isDev ? { icon: path.join(__dirname, '..', 'build', 'icon.png') } : {}),
     webPreferences: {
@@ -109,6 +110,12 @@ function createWindow() {
   })
 
   win.setMenuBarVisibility(false)
+
+  // Εκκίνηση με μεγιστοποιημένο παράθυρο.
+  win.once('ready-to-show', () => {
+    win.maximize()
+    win.show()
+  })
 
   if (isDev) {
     win.loadURL(process.env.VITE_DEV_SERVER_URL)
