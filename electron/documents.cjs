@@ -108,13 +108,17 @@ function findSoffice(resourcesPath, isDev) {
 }
 
 // Μετατροπή pptx/docx -> pdf. Επιστρέφει το path του PDF.
-function convertToPdf(srcPath, outDir, soffice) {
+// profileDir: σταθερός (persistent) φάκελος προφίλ LibreOffice. Η 1η μετατροπή τον
+// δημιουργεί (αργή σε HDD + antivirus που σκανάρει το φρεσκο-εγκατεστημένο LO), οι
+// επόμενες τον επαναχρησιμοποιούν -> ~10x ταχύτερες (μετρήθηκε 26.9s ψυχρό vs 2.7s ζεστό).
+// Αν δεν δοθεί (π.χ. κλήση εκτός Electron), πέφτουμε σε σταθερό φάκελο στο tmp.
+function convertToPdf(srcPath, outDir, soffice, profileDir) {
   const pptxPath = srcPath
-  const profileDir = path.join(os.tmpdir(), `lo_profile_${process.pid}`)
+  const profile = profileDir || path.join(os.tmpdir(), 'mathitologio_lo_profile')
   // Έγκυρο file:// URL και στα δύο OS: στα Windows δίνει file:///C:/... (τρία slashes),
   // στο Linux/mac file:///tmp/... — το χειροκίνητο `file://`+path έσπαγε στα Windows
   // (file://C:/... → το C: ερμηνευόταν ως host) και προκαλούσε «bootstrap.ini is corrupt».
-  const userInstallationUrl = pathToFileURL(profileDir).href
+  const userInstallationUrl = pathToFileURL(profile).href
   const result = spawnSync(
     soffice,
     [
@@ -128,7 +132,10 @@ function convertToPdf(srcPath, outDir, soffice) {
       outDir,
       pptxPath,
     ],
-    { encoding: 'utf8', timeout: 120000 }
+    // Timeout 5': η πρώτη ψυχρή εκτέλεση σε αργό δίσκο (HDD) ενώ ο antivirus σκανάρει
+    // τα χιλιάδες αρχεία του LO μπορεί να ξεπεράσει τα 2' — το persistent profile
+    // επιταχύνει τις επόμενες, αλλά όχι την πρώτη.
+    { encoding: 'utf8', timeout: 300000 }
   )
 
   if (result.error) {
@@ -144,11 +151,14 @@ function convertToPdf(srcPath, outDir, soffice) {
 }
 
 // Πλήρης ροή: γέμισμα template + μετατροπή σε PDF. Επιστρέφει το path του PDF.
-function generate({ templatePath, data, resourcesPath, isDev }) {
+function generate({ templatePath, data, resourcesPath, isDev, userDataPath }) {
   const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'mathitologio_'))
   const filled = fillTemplate(templatePath, data, tmpDir)
   const soffice = findSoffice(resourcesPath, isDev)
-  return convertToPdf(filled, tmpDir, soffice)
+  // Persistent προφίλ LibreOffice μέσα στο userData (όταν τρέχουμε σε Electron),
+  // ώστε να μη δημιουργείται νέο προφίλ σε κάθε έκδοση εγγράφου.
+  const profileDir = userDataPath ? path.join(userDataPath, 'lo_profile') : null
+  return convertToPdf(filled, tmpDir, soffice, profileDir)
 }
 
 module.exports = { fillTemplate, convertToPdf, findSoffice, generate, xmlEscape, extractTokens }

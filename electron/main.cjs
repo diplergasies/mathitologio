@@ -535,6 +535,7 @@ ipcMain.handle('documents:bulkGenerate', async (_e, { ids = [], templateFiles = 
           data,
           resourcesPath: isDev ? null : process.resourcesPath,
           isDev,
+          userDataPath: app.getPath('userData'),
         })
         const safe = `${s.eponymo}_${s.onoma}_${tf.replace(/\.(pptx|docx)$/i, '')}.pdf`.replace(
           /[\\/:*?"<>|\s]+/g,
@@ -649,6 +650,7 @@ ipcMain.handle('documents:generate', async (_e, { id, templateFile, signee }) =>
       data,
       resourcesPath: isDev ? null : process.resourcesPath,
       isDev,
+      userDataPath: app.getPath('userData'),
     })
   } catch (err) {
     return { error: err.message }
