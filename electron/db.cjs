@@ -78,6 +78,12 @@ async function init(userDataDir) {
   }
   db.run(SCHEMA)
   ensureColumn('students', 'deleted_at', 'TEXT')
+  ensureColumn('students', 'enrolled_at', 'TEXT')
+  // Backfill: παλαιότεροι εγγεγραμμένοι χωρίς enrolled_at -> updated_at/created_at (καλύτερη εκτίμηση).
+  db.run(
+    `UPDATE students SET enrolled_at = COALESCE(updated_at, created_at)
+      WHERE status='enrolled' AND (enrolled_at IS NULL OR enrolled_at='')`
+  )
   save()
   return db
 }

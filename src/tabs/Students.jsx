@@ -6,6 +6,7 @@ import BulkDocumentModal from '../components/BulkDocumentModal'
 import SchoolCell from '../components/SchoolCell'
 import GradeCell from '../components/GradeCell'
 import { useSelection } from '../useSelection'
+import { birthSortValue } from '../sort'
 import { FileText, Trash2, Users } from 'lucide-react'
 
 export default function Students({ version, bump }) {
@@ -42,10 +43,12 @@ export default function Students({ version, bump }) {
     { key: 'onoma', label: 'Όνομα' },
     { key: 'patronymo', label: 'Πατρώνυμο' },
     { key: 'fylo', label: 'Φύλο' },
-    { key: 'imerominia_gennisis', label: 'Ημ. γέννησης' },
+    { key: 'imerominia_gennisis', label: 'Ημ. γέννησης', sortable: true, sortAccessor: birthSortValue },
     {
       key: 'school_name',
       label: 'Σχολείο',
+      sortable: true,
+      sortAccessor: (s) => s.school_name || '',
       render: (s) => <SchoolCell student={s} onChanged={bump} />,
     },
     { key: 'school_type', label: 'Τύπος', render: (s) => s.school_type || '—' },
@@ -100,6 +103,7 @@ export default function Students({ version, bump }) {
         students={students}
         columns={columns}
         emptyText="Κανένας εγγεγραμμένος μαθητής."
+        searchable
         selectable
         selectedIds={sel.ids}
         onToggle={sel.toggle}

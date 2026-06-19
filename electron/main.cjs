@@ -128,10 +128,15 @@ function createWindow() {
 
 ipcMain.handle('app:info', () => {
   const S = getSchoolYearStart()
+  // Πρώτη εκκίνηση: καμία ρύθμιση ΣΕΠ συμπληρωμένη ΚΑΙ κανένα σχολείο καταχωρημένο.
+  const cfg = db.getAllSettings()
+  const schoolsCount = db.query('SELECT COUNT(*) AS c FROM schools')[0].c
+  const firstRun = !cfg.sep && !cfg.perif && !cfg.nomos && !cfg.domi && schoolsCount === 0
   return {
     version: app.getVersion(),
     schoolYearStart: S,
     schoolYearLabel: grades.schoolYearLabel(S),
+    firstRun,
   }
 })
 
@@ -280,7 +285,7 @@ ipcMain.handle('students:enroll', (_e, { id, schoolId }) => {
   db.run(
     `UPDATE students
         SET status='enrolled', prev_status=status, school_id=$sid,
-            current_grade=$g, updated_at=$now
+            current_grade=$g, enrolled_at=$now, updated_at=$now
       WHERE id=$id`,
     { $sid: assigned, $g: grade, $now: nowIso(), $id: id }
   )
@@ -394,7 +399,7 @@ ipcMain.handle('students:bulkEnroll', (_e, { ids = [], mode, schoolId }) => {
     }
     db.run(
       `UPDATE students SET status='enrolled', prev_status=status, school_id=$sid,
-              current_grade=$g, updated_at=$now WHERE id=$id`,
+              current_grade=$g, enrolled_at=$now, updated_at=$now WHERE id=$id`,
       { $sid: target ? target.id : null, $g: cls.grade, $now: nowIso(), $id: id }
     )
     if (target) enrolled++
@@ -597,6 +602,135 @@ ipcMain.handle('backup:import', async () => {
   const buf = fs.readFileSync(filePaths[0])
   db.replaceFromBuffer(buf)
   return { ok: true }
+})
+
+// ---- Αποτύπωση / μηνιαία στατιστικά ---------------------------------------
+
+const GREEK_MONTHS = [
+  'Ιανουάριος', 'Φεβρουάριος', 'Μάρτιος', 'Απρίλιος', 'Μάιος', 'Ιούνιος',
+  'Ιούλιος', 'Αύγουστος', 'Σεπτέμβριος', 'Οκτώβριος', 'Νοέμβριος', 'Δεκέμβριος',
+]
+
+const CATEGORY_ORDER = ['Νηπιαγωγείο', 'Δημοτικό', 'Γυμνάσιο', 'Λύκειο', 'ΕΠΑΛ']
+
+// ISO της πρώτης στιγμής του ΕΠΟΜΕΝΟΥ μήνα (όριο "έως & συμπεριλαμβανομένου" του μήνα).
+function nextMonthBoundIso(year, month) {
+  const y = month === 12 ? year + 1 : year
+  return new Date(Date.UTC(y, month % 12, 1, 0, 0, 0)).toISOString()
+}
+
+// Κανονικοποίηση φύλου -> 'male' | 'female' | 'other'.
+function genderOf(fylo) {
+  const f = String(fylo || '')
+    .normalize('NFD')
+    .replace(/[̀-ͯ]/g, '')
+    .trim()
+    .toUpperCase()
+  if (f.startsWith('Α')) return 'male'
+  if (f.startsWith('Θ')) return 'female'
+  return 'other'
+}
+
+function levelOf(category) {
+  if (category === 'Νηπιαγωγείο' || category === 'Δημοτικό') return 'Πρωτοβάθμια'
+  if (category === 'Γυμνάσιο' || category === 'Λύκειο' || category === 'ΕΠΑΛ') return 'Δευτεροβάθμια'
+  return 'Άλλο'
+}
+
+function emptyCounts() {
+  return { male: 0, female: 0, other: 0, total: 0 }
+}
+function addCount(c, g) {
+  c[g] += 1
+  c.total += 1
+}
+
+ipcMain.handle('stats:monthly', (_e, period) => {
+  const now = new Date()
+  const year = Number(period && period.year) || now.getFullYear()
+  const month = Number(period && period.month) || now.getMonth() + 1
+  const bound = nextMonthBoundIso(year, month)
+
+  const rows = db.query(
+    `SELECT s.status, s.prev_status, s.fylo, s.computed_type, s.enrolled_at, s.deleted_at,
+            sc.id AS school_id, sc.name AS school_name, sc.type AS school_type
+       FROM students s LEFT JOIN schools sc ON sc.id = s.school_id
+      WHERE s.status IN ('enrolled', 'deleted')`
+  )
+
+  // Μαθητές "παρόντες" στον επιλεγμένο μήνα (στιγμιότυπο τέλους μήνα).
+  const present = rows.filter((s) => {
+    const enrolledOk = !s.enrolled_at || s.enrolled_at < bound
+    if (!enrolledOk) return false
+    if (s.status === 'enrolled') return true
+    // Διαγραμμένος: μετράει μόνο αν ήταν εγγεγραμμένος και διαγράφηκε ΜΕΤΑ το τέλος του μήνα.
+    return s.prev_status === 'enrolled' && s.enrolled_at && s.deleted_at && s.deleted_at >= bound
+  })
+
+  const totals = emptyCounts()
+  const catCounts = {} // category -> counts
+  const schoolMap = new Map() // key -> { name, type, counts }
+
+  for (const s of present) {
+    const g = genderOf(s.fylo)
+    const category = s.school_type || s.computed_type || '—'
+    addCount(totals, g)
+
+    if (!catCounts[category]) catCounts[category] = emptyCounts()
+    addCount(catCounts[category], g)
+
+    const key = s.school_id != null ? `id:${s.school_id}` : 'none'
+    if (!schoolMap.has(key)) {
+      schoolMap.set(key, {
+        name: s.school_id != null ? s.school_name : 'Χωρίς σχολείο',
+        type: s.school_id != null ? s.school_type : '',
+        counts: emptyCounts(),
+      })
+    }
+    addCount(schoolMap.get(key).counts, g)
+  }
+
+  // Ανά βαθμίδα (Πρωτοβάθμια / Δευτεροβάθμια) με ανάλυση ανά κατηγορία.
+  const levelGroups = { 'Πρωτοβάθμια': [], 'Δευτεροβάθμια': [], 'Άλλο': [] }
+  Object.keys(catCounts)
+    .sort((a, b) => (CATEGORY_ORDER.indexOf(a) + 1 || 99) - (CATEGORY_ORDER.indexOf(b) + 1 || 99))
+    .forEach((cat) => {
+      levelGroups[levelOf(cat)].push({ category: cat, ...catCounts[cat] })
+    })
+
+  const byLevel = ['Πρωτοβάθμια', 'Δευτεροβάθμια', 'Άλλο']
+    .filter((lv) => levelGroups[lv].length)
+    .map((lv) => {
+      const sum = emptyCounts()
+      levelGroups[lv].forEach((c) => {
+        sum.male += c.male
+        sum.female += c.female
+        sum.other += c.other
+        sum.total += c.total
+      })
+      return { level: lv, categories: levelGroups[lv], ...sum }
+    })
+
+  const TYPE_RANK = { 'Νηπιαγωγείο': 1, 'Δημοτικό': 2, 'Γυμνάσιο': 3, 'Λύκειο': 4, 'ΕΠΑΛ': 5 }
+  const bySchool = [...schoolMap.values()]
+    .sort((a, b) => {
+      if (a.type === '' && b.type !== '') return 1
+      if (b.type === '' && a.type !== '') return -1
+      const ta = TYPE_RANK[a.type] || 99
+      const tb = TYPE_RANK[b.type] || 99
+      if (ta !== tb) return ta - tb
+      return a.name.localeCompare(b.name, 'el')
+    })
+    .map((x) => ({ name: x.name, type: x.type, ...x.counts }))
+
+  return {
+    year,
+    month,
+    period: `${GREEK_MONTHS[month - 1]} ${year}`,
+    totals,
+    byLevel,
+    bySchool,
+  }
 })
 
 // ---------------------------------------------------------------- App lifecycle

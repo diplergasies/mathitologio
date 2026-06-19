@@ -18,8 +18,8 @@ const columns = [
   { key: 'patronymo', label: 'Πατρώνυμο' },
   { key: 'fylo', label: 'Φύλο' },
   { key: 'imerominia_gennisis', label: 'Ημ. γέννησης' },
-  { key: 'school_name', label: 'Σχολείο', render: (s) => s.school_name || '—' },
-  { key: 'current_grade', label: 'Τάξη', render: (s) => s.current_grade || '—' },
+  { key: 'school_name', label: 'Σχολείο' },
+  { key: 'current_grade', label: 'Τάξη' },
   { key: 'deleted_at', label: 'Ημ. διαγραφής', render: (s) => fmtDeleted(s.deleted_at) },
   {
     key: 'prev_status',
@@ -90,6 +90,7 @@ export default function Deletions({ version, bump }) {
         students={students}
         columns={columns}
         emptyText="Καμία διαγραφή."
+        searchable
         selectable
         selectedIds={sel.ids}
         onToggle={sel.toggle}

@@ -3,6 +3,7 @@
 const fs = require('fs')
 const os = require('os')
 const path = require('path')
+const { pathToFileURL } = require('url')
 const { spawnSync } = require('child_process')
 const PizZip = require('pizzip')
 
@@ -110,13 +111,17 @@ function findSoffice(resourcesPath, isDev) {
 function convertToPdf(srcPath, outDir, soffice) {
   const pptxPath = srcPath
   const profileDir = path.join(os.tmpdir(), `lo_profile_${process.pid}`)
+  // Έγκυρο file:// URL και στα δύο OS: στα Windows δίνει file:///C:/... (τρία slashes),
+  // στο Linux/mac file:///tmp/... — το χειροκίνητο `file://`+path έσπαγε στα Windows
+  // (file://C:/... → το C: ερμηνευόταν ως host) και προκαλούσε «bootstrap.ini is corrupt».
+  const userInstallationUrl = pathToFileURL(profileDir).href
   const result = spawnSync(
     soffice,
     [
       '--headless',
       '--norestore',
       '--nolockcheck',
-      `-env:UserInstallation=file://${profileDir.replace(/\\/g, '/')}`,
+      `-env:UserInstallation=${userInstallationUrl}`,
       '--convert-to',
       'pdf',
       '--outdir',

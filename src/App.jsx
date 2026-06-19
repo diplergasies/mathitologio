@@ -4,14 +4,16 @@ import Arrivals from './tabs/Arrivals'
 import Students from './tabs/Students'
 import Deletions from './tabs/Deletions'
 import Settings from './tabs/Settings'
+import Report from './tabs/Report'
 import HelpModal from './components/HelpModal'
-import { Upload, Download, Database, PlaneLanding, Users, Trash2, Settings as SettingsIcon, BookOpen, HelpCircle } from 'lucide-react'
+import { Upload, Download, Database, PlaneLanding, Users, Trash2, Settings as SettingsIcon, BarChart3, BookOpen, HelpCircle } from 'lucide-react'
 
 const TABS = [
   { id: 'arrivals', label: 'Αφίξεις', icon: PlaneLanding, Comp: Arrivals },
   { id: 'students', label: 'Μαθητές', icon: Users, Comp: Students },
   { id: 'deletions', label: 'Διαγραφές', icon: Trash2, Comp: Deletions },
   { id: 'settings', label: 'Ρυθμίσεις', icon: SettingsIcon, Comp: Settings },
+  { id: 'report', label: 'Αποτύπωση', icon: BarChart3, Comp: Report },
 ]
 
 export default function App() {
@@ -24,7 +26,11 @@ export default function App() {
   const bump = () => setVersion((v) => v + 1)
 
   useEffect(() => {
-    api.appInfo().then(setInfo)
+    api.appInfo().then((i) => {
+      setInfo(i)
+      // Πρώτη εκκίνηση: άνοιγμα Ρυθμίσεων ώστε ο χρήστης να ορίσει στοιχεία & σχολεία.
+      if (i && i.firstRun) setTab('settings')
+    })
   }, [])
 
   function showToast(text, type = 'ok') {

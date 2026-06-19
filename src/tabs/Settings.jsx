@@ -150,7 +150,7 @@ export default function Settings({ version, bump }) {
           {field('sep', 'Ονοματεπώνυμο ΣΕΠ', 'π.χ. Ιωάννης Παπαδόπουλος')}
           {field('nomos', 'Νομός', 'π.χ. Αττικής')}
           <div className="sm:col-span-2">
-            {field('perif', 'Περιφερειακή Διεύθυνση Εκπαίδευσης', 'π.χ. Αττικής')}
+            {field('perif', 'Περιφερειακή Διεύθυνση Εκπαίδευσης', 'Ανατολικής Μακεδονίας & Θράκης')}
           </div>
           <div className="sm:col-span-2">{field('domi', 'Δομή φιλοξενίας', 'π.χ. ΚΥΤ / Δομή ...')}</div>
         </div>

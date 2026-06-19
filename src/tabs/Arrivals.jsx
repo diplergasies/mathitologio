@@ -3,6 +3,7 @@ import api from '../api'
 import StudentTable from '../components/StudentTable'
 import BulkEnrollModal from '../components/BulkEnrollModal'
 import { useSelection } from '../useSelection'
+import { birthSortValue, proposedSortValue } from '../sort'
 import { GraduationCap, Trash2, Users } from 'lucide-react'
 
 const columns = [
@@ -10,7 +11,7 @@ const columns = [
   { key: 'onoma', label: 'Όνομα' },
   { key: 'patronymo', label: 'Πατρώνυμο' },
   { key: 'fylo', label: 'Φύλο' },
-  { key: 'imerominia_gennisis', label: 'Ημ. γέννησης' },
+  { key: 'imerominia_gennisis', label: 'Ημ. γέννησης', sortable: true, sortAccessor: birthSortValue },
   { key: 'ithageneia', label: 'Ιθαγένεια' },
   { key: 'glossa', label: 'Γλώσσα' },
   { key: 'imerominia_afixis', label: 'Ημ. άφιξης' },
@@ -18,6 +19,8 @@ const columns = [
   {
     key: 'proposed',
     label: 'Προτεινόμενη τάξη',
+    sortable: true,
+    sortAccessor: proposedSortValue,
     render: (s) => `${s.computed_type} · ${s.computed_grade}`,
   },
 ]
@@ -79,6 +82,7 @@ export default function Arrivals({ version, bump }) {
         students={students}
         columns={columns}
         emptyText="Καμία άφιξη. Κάνε εισαγωγή αρχείου XLSX."
+        searchable
         selectable
         selectedIds={sel.ids}
         onToggle={sel.toggle}
