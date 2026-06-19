@@ -825,11 +825,33 @@ ipcMain.handle('stats:monthly', (_e, period) => {
   }
 })
 
+// Προθέρμανση LibreOffice στην 1η εκκίνηση (όταν δεν υπάρχει ακόμη το persistent
+// προφίλ): αθόρυβη μετατροπή ενός template σε background, ώστε η πρώτη πραγματική
+// έκδοση εγγράφου να μη χτυπήσει την ψυχρή καθυστέρηση (DLLs + προφίλ + antivirus).
+// Best-effort: ποτέ δεν πρέπει να ρίξει/καθυστερήσει την εκκίνηση.
+function warmUpLibreOffice() {
+  try {
+    const profileDir = path.join(app.getPath('userData'), 'lo_profile')
+    if (fs.existsSync(profileDir)) return // ήδη ζεστό από προηγούμενη χρήση
+    const dir = templatesDir()
+    if (!fs.existsSync(dir)) return
+    const tpl = fs.readdirSync(dir).find((f) => /\.(pptx|docx)$/i.test(f))
+    if (!tpl) return
+    const soffice = documents.findSoffice(isDev ? null : process.resourcesPath, isDev)
+    documents
+      .warmUpProfile({ templatePath: path.join(dir, tpl), soffice, profileDir })
+      .catch(() => {})
+  } catch {
+    // σιωπηλά — η προθέρμανση είναι προαιρετική
+  }
+}
+
 // ---------------------------------------------------------------- App lifecycle
 
 app.whenReady().then(async () => {
   await db.init(app.getPath('userData'))
   createWindow()
+  warmUpLibreOffice() // fire-and-forget· δεν μπλοκάρει την εκκίνηση
   app.on('activate', () => {
     if (BrowserWindow.getAllWindows().length === 0) createWindow()
   })

@@ -4,7 +4,7 @@ const fs = require('fs')
 const os = require('os')
 const path = require('path')
 const { pathToFileURL } = require('url')
-const { spawnSync } = require('child_process')
+const { spawnSync, spawn } = require('child_process')
 const PizZip = require('pizzip')
 
 function xmlEscape(s) {
@@ -161,4 +161,71 @@ function generate({ templatePath, data, resourcesPath, isDev, userDataPath }) {
   return convertToPdf(filled, tmpDir, soffice, profileDir)
 }
 
-module.exports = { fillTemplate, convertToPdf, findSoffice, generate, xmlEscape, extractTokens }
+// Προθέρμανση (warm-up) του persistent προφίλ LibreOffice σε background, ΧΩΡΙΣ να
+// μπλοκάρει το main process (async spawn, όχι spawnSync). Καλείται στην 1η εκκίνηση
+// όταν δεν υπάρχει ακόμη προφίλ, ώστε ο χρήστης να μη χτυπήσει την ψυχρή καθυστέρηση
+// (φόρτωση DLLs + δημιουργία προφίλ + scan antivirus) ζωντανά στην πρώτη έκδοση εγγράφου.
+// Best-effort: ποτέ δεν κάνει reject — επιστρέφει true/false.
+function warmUpProfile({ templatePath, soffice, profileDir }) {
+  return new Promise((resolve) => {
+    if (!soffice || !templatePath || !fs.existsSync(templatePath)) return resolve(false)
+    let outDir
+    try {
+      outDir = fs.mkdtempSync(path.join(os.tmpdir(), 'mathitologio_warmup_'))
+    } catch {
+      return resolve(false)
+    }
+    const profile = profileDir || path.join(os.tmpdir(), 'mathitologio_lo_profile')
+    const userInstallationUrl = pathToFileURL(profile).href
+
+    let done = false
+    const finish = (ok) => {
+      if (done) return
+      done = true
+      try {
+        fs.rmSync(outDir, { recursive: true, force: true })
+      } catch {}
+      resolve(ok)
+    }
+
+    let child
+    try {
+      child = spawn(
+        soffice,
+        [
+          '--headless',
+          '--norestore',
+          '--nolockcheck',
+          `-env:UserInstallation=${userInstallationUrl}`,
+          '--convert-to',
+          'pdf',
+          '--outdir',
+          outDir,
+          templatePath,
+        ],
+        { stdio: 'ignore', windowsHide: true }
+      )
+    } catch {
+      return finish(false)
+    }
+
+    // Ασφαλιστικό: αν κολλήσει, σκότωσε το child και μην αφήσεις zombie/temp.
+    const killer = setTimeout(() => {
+      try {
+        child.kill()
+      } catch {}
+      finish(false)
+    }, 300000)
+
+    child.on('error', () => {
+      clearTimeout(killer)
+      finish(false)
+    })
+    child.on('exit', () => {
+      clearTimeout(killer)
+      finish(true)
+    })
+  })
+}
+
+module.exports = { fillTemplate, convertToPdf, findSoffice, generate, warmUpProfile, xmlEscape, extractTokens }
