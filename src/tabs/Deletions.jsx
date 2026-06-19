@@ -16,6 +16,8 @@ const columns = [
   { key: 'eponymo', label: 'Επώνυμο' },
   { key: 'onoma', label: 'Όνομα' },
   { key: 'patronymo', label: 'Πατρώνυμο' },
+  { key: 'monada', label: 'Μονάδα' },
+  { key: 'dika', label: 'ΔΙΚΑ' },
   { key: 'fylo', label: 'Φύλο' },
   { key: 'imerominia_gennisis', label: 'Ημ. γέννησης' },
   { key: 'school_name', label: 'Σχολείο' },

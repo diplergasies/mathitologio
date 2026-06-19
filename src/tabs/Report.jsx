@@ -65,12 +65,11 @@ export default function Report({ version }) {
       </div>
 
       {/* Σύνολα */}
-      <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
+      <div className="grid grid-cols-3 gap-3">
         {[
           { label: 'Σύνολο μαθητών', n: t.total, accent: 'text-blue-600' },
           { label: 'Άρρενες', n: t.male, accent: 'text-slate-700' },
           { label: 'Θήλεις', n: t.female, accent: 'text-slate-700' },
-          { label: 'Λοιπά', n: t.other, accent: 'text-slate-500' },
         ].map((c) => (
           <div key={c.label} className="rounded-lg border border-slate-200 bg-white p-4">
             <div className={`text-2xl font-bold ${c.accent}`}>{c.n}</div>

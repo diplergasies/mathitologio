@@ -56,6 +56,35 @@ function isSchoolAge(birthYear, schoolYearStart) {
   return classify(birthYear, schoolYearStart) !== null
 }
 
+// Προβιβασμός: από (τύπος, τάξη) -> επόμενο βήμα.
+// Επιστρέφει { type, grade } (επόμενη τάξη, ίσως νέος τύπος στα όρια βαθμίδας),
+// ή { graduated: true } (απόφοιτος Γ′ Λυκείου/ΕΠΑΛ), ή null αν άγνωστο.
+function promote(type, grade) {
+  if (type === 'Νηπιαγωγείο') {
+    if (grade === 'Προνήπιο') return { type: 'Νηπιαγωγείο', grade: 'Νήπιο' }
+    return { type: 'Δημοτικό', grade: 'Α′' } // Νήπιο -> Δημοτικό
+  }
+  if (type === 'Δημοτικό') {
+    const i = DIMOTIKO_GRADES.indexOf(grade)
+    if (i < 0) return null
+    if (i < DIMOTIKO_GRADES.length - 1) return { type: 'Δημοτικό', grade: DIMOTIKO_GRADES[i + 1] }
+    return { type: 'Γυμνάσιο', grade: 'Α′' } // ΣΤ′ -> Γυμνάσιο
+  }
+  if (type === 'Γυμνάσιο') {
+    const i = TRIETIA_GRADES.indexOf(grade)
+    if (i < 0) return null
+    if (i < TRIETIA_GRADES.length - 1) return { type: 'Γυμνάσιο', grade: TRIETIA_GRADES[i + 1] }
+    return { type: 'Λύκειο', grade: 'Α′' } // Γ′ Γυμνασίου -> Λύκειο (ή ΕΠΑΛ — default Λύκειο)
+  }
+  if (type === 'Λύκειο' || type === 'ΕΠΑΛ') {
+    const i = TRIETIA_GRADES.indexOf(grade)
+    if (i < 0) return null
+    if (i < TRIETIA_GRADES.length - 1) return { type, grade: TRIETIA_GRADES[i + 1] }
+    return { graduated: true } // Γ′ -> απόφοιτος
+  }
+  return null
+}
+
 // Το έτος έναρξης του τρέχοντος σχολικού έτους με βάση μια ημερομηνία.
 // Το σχολικό έτος αλλάζει ~1 Σεπτεμβρίου: μήνες Ιαν–Αυγ ανήκουν στο έτος που ξεκίνησε πέρυσι.
 function currentSchoolYearStart(date = new Date()) {
@@ -102,6 +131,7 @@ module.exports = {
   gradesForType,
   classify,
   isSchoolAge,
+  promote,
   currentSchoolYearStart,
   schoolYearLabel,
   gradeTable,

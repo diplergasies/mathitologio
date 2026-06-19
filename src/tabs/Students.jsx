@@ -3,16 +3,18 @@ import api from '../api'
 import StudentTable from '../components/StudentTable'
 import DocumentModal from '../components/DocumentModal'
 import BulkDocumentModal from '../components/BulkDocumentModal'
+import BulkDeleteByDikaModal from '../components/BulkDeleteByDikaModal'
 import SchoolCell from '../components/SchoolCell'
 import GradeCell from '../components/GradeCell'
 import { useSelection } from '../useSelection'
 import { birthSortValue } from '../sort'
-import { FileText, Trash2, Users } from 'lucide-react'
+import { FileText, Trash2, Users, Hash } from 'lucide-react'
 
 export default function Students({ version, bump }) {
   const [students, setStudents] = useState([])
   const [docFor, setDocFor] = useState(null)
   const [bulkDoc, setBulkDoc] = useState(false)
+  const [dikaDelete, setDikaDelete] = useState(false)
   const sel = useSelection()
 
   function load() {
@@ -42,6 +44,8 @@ export default function Students({ version, bump }) {
     { key: 'eponymo', label: 'Επώνυμο' },
     { key: 'onoma', label: 'Όνομα' },
     { key: 'patronymo', label: 'Πατρώνυμο' },
+    { key: 'monada', label: 'Μονάδα' },
+    { key: 'dika', label: 'ΔΙΚΑ' },
     { key: 'fylo', label: 'Φύλο' },
     { key: 'imerominia_gennisis', label: 'Ημ. γέννησης', sortable: true, sortAccessor: birthSortValue },
     {
@@ -76,7 +80,15 @@ export default function Students({ version, bump }) {
 
   return (
     <div>
-      <div className="mb-3 text-sm text-slate-500">{students.length} εγγεγραμμένοι μαθητές</div>
+      <div className="mb-3 flex items-center justify-between gap-3">
+        <span className="text-sm text-slate-500">{students.length} εγγεγραμμένοι μαθητές</span>
+        <button
+          onClick={() => setDikaDelete(true)}
+          className="inline-flex items-center gap-1.5 rounded-md border border-red-300 px-3 py-1.5 text-sm font-medium text-red-600 hover:bg-red-50"
+        >
+          <Hash size={15} /> Μαζική διαγραφή με ΔΙΚΑ
+        </button>
+      </div>
 
       {sel.ids.length > 0 && (
         <div className="mb-3 flex items-center gap-2 rounded-lg border border-blue-200 bg-blue-50 px-3 py-2 text-sm">
@@ -130,6 +142,17 @@ export default function Students({ version, bump }) {
 
       {docFor && <DocumentModal student={docFor} onClose={() => setDocFor(null)} />}
       {bulkDoc && <BulkDocumentModal ids={sel.ids} onClose={() => setBulkDoc(false)} />}
+
+      {dikaDelete && (
+        <BulkDeleteByDikaModal
+          students={students}
+          onClose={() => setDikaDelete(false)}
+          onDeleted={() => {
+            sel.clear()
+            bump()
+          }}
+        />
+      )}
     </div>
   )
 }

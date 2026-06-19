@@ -408,6 +408,96 @@ ipcMain.handle('students:bulkEnroll', (_e, { ids = [], mode, schoolId }) => {
   return { ok: true, enrolled, needSchool, skipped }
 })
 
+// ---- Προβιβασμός / νέο σχολικό έτος ---------------------------------------
+
+// Μοναδικό σχολείο ενός τύπου -> id, αλλιώς null (ίδια λογική με την εγγραφή).
+function singleSchoolOfType(type) {
+  const matches = db.query('SELECT id FROM schools WHERE type=$t', { $t: type })
+  return matches.length === 1 ? matches[0].id : null
+}
+
+// Λίστα εγγεγραμμένων μαθητών με προ-υπολογισμένο επόμενο βήμα προβιβασμού.
+ipcMain.handle('promotion:preview', () => {
+  const S = getSchoolYearStart()
+  const rows = db.query(
+    `SELECT s.id, s.eponymo, s.onoma, s.current_grade, s.computed_type, sc.type AS school_type
+       FROM students s LEFT JOIN schools sc ON sc.id = s.school_id
+      WHERE s.status='enrolled'
+      ORDER BY s.eponymo COLLATE NOCASE, s.onoma COLLATE NOCASE`
+  )
+  return {
+    schoolYearStart: S,
+    schoolYearLabel: grades.schoolYearLabel(S),
+    nextLabel: grades.schoolYearLabel(S + 1),
+    rows: rows.map((r) => {
+      const currentType = r.school_type || r.computed_type || ''
+      return {
+        id: r.id,
+        eponymo: r.eponymo,
+        onoma: r.onoma,
+        currentType,
+        currentGrade: r.current_grade || '',
+        next: grades.promote(currentType, r.current_grade),
+      }
+    }),
+  }
+})
+
+// Εφαρμογή προβιβασμού: promotedIds = όσοι προβιβάστηκαν (οι υπόλοιποι μένουν ως έχουν).
+ipcMain.handle('promotion:apply', (_e, promotedIds = []) => {
+  let promoted = 0
+  let graduated = 0
+  let needSchool = 0
+  const now = nowIso()
+
+  for (const id of promotedIds) {
+    const rows = db.query(
+      `SELECT s.*, sc.type AS school_type
+         FROM students s LEFT JOIN schools sc ON sc.id = s.school_id
+        WHERE s.id=$id AND s.status='enrolled'`,
+      { $id: id }
+    )
+    if (!rows.length) continue
+    const s = rows[0]
+    const effType = s.school_type || s.computed_type || ''
+    const next = grades.promote(effType, s.current_grade)
+    if (!next) continue
+
+    if (next.graduated) {
+      // Απόφοιτος -> Διαγραφές (soft delete, όπως students:delete).
+      db.run(
+        `UPDATE students SET prev_status=status, status='deleted', deleted_at=$now, updated_at=$now WHERE id=$id`,
+        { $now: now, $id: id }
+      )
+      graduated++
+      continue
+    }
+
+    // Σχολείο: ίδιος τύπος -> κράτα το ίδιο· αλλιώς auto-assign μοναδικού ή κενό.
+    let schoolId
+    if (next.type === effType) {
+      schoolId = s.school_id != null ? s.school_id : null
+    } else {
+      schoolId = singleSchoolOfType(next.type)
+    }
+    if (schoolId == null) needSchool++
+
+    db.run(
+      `UPDATE students
+          SET current_grade=$g, computed_type=$ct, computed_grade=$g, school_id=$sid, updated_at=$now
+        WHERE id=$id`,
+      { $g: next.grade, $ct: next.type, $sid: schoolId, $now: now, $id: id }
+    )
+    promoted++
+  }
+
+  // Προχώρα το σχολικό έτος κατά 1.
+  const yearStart = getSchoolYearStart() + 1
+  db.setSettings({ schoolYearStart: String(yearStart) })
+
+  return { ok: true, promoted, graduated, needSchool, yearStart, yearLabel: grades.schoolYearLabel(yearStart) }
+})
+
 ipcMain.handle('documents:bulkGenerate', async (_e, { ids = [], templateFiles = [], signee }) => {
   if (!templateFiles.length) return { error: 'Δεν επιλέχθηκαν templates' }
   const { canceled, filePaths } = await dialog.showOpenDialog({

@@ -1,7 +1,8 @@
 import { useEffect, useState } from 'react'
 import api from '../api'
 import Schools from './Schools'
-import { UserCog, Save, School, CalendarRange } from 'lucide-react'
+import PromotionModal from '../components/PromotionModal'
+import { UserCog, Save, School, CalendarRange, GraduationCap } from 'lucide-react'
 
 // Ζωντανός υπολογισμός εύρους ετών ανά τύπο, από το έτος προνηπίου P.
 function tableFor(P) {
@@ -18,15 +19,18 @@ function SchoolYearSection({ bump }) {
   const [nip, setNip] = useState(null) // έτος προνηπίου (Νηπιαγωγείο, μικρότερη ηλικία)
   const [label, setLabel] = useState('')
   const [saved, setSaved] = useState(false)
+  const [showPromote, setShowPromote] = useState(false)
 
-  useEffect(() => {
+  function reload() {
     api.getSchoolYear().then((d) => {
       if (d) {
         setNip(d.nipYear)
         setLabel(d.schoolYearLabel)
       }
     })
-  }, [])
+  }
+
+  useEffect(reload, [])
 
   async function save() {
     const res = await api.setSchoolYear(Number(nip))
@@ -93,6 +97,28 @@ function SchoolYearSection({ bump }) {
           </tbody>
         </table>
       </div>
+
+      <div className="mt-4 flex items-center gap-3 border-t border-slate-100 pt-4">
+        <button
+          onClick={() => setShowPromote(true)}
+          className="inline-flex items-center gap-1.5 rounded-md bg-emerald-600 px-3 py-2 text-sm font-medium text-white hover:bg-emerald-700"
+        >
+          <GraduationCap size={16} /> Προβιβασμός / Νέο σχολικό έτος
+        </button>
+        <span className="text-xs text-slate-400">
+          Προβιβάζει τους εγγεγραμμένους στην επόμενη τάξη και προχωρά το σχολικό έτος κατά 1.
+        </span>
+      </div>
+
+      {showPromote && (
+        <PromotionModal
+          onClose={() => setShowPromote(false)}
+          onDone={() => {
+            reload()
+            bump && bump()
+          }}
+        />
+      )}
     </div>
   )
 }

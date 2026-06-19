@@ -37,6 +37,9 @@ contextBridge.exposeInMainWorld('api', {
   bulkPurge: (ids) => ipcRenderer.invoke('students:bulkPurge', ids),
   bulkEnroll: (ids, mode, schoolId) =>
     ipcRenderer.invoke('students:bulkEnroll', { ids, mode, schoolId }),
+
+  promotionPreview: () => ipcRenderer.invoke('promotion:preview'),
+  applyPromotion: (ids) => ipcRenderer.invoke('promotion:apply', ids),
   bulkGenerate: (ids, templateFiles, signee) =>
     ipcRenderer.invoke('documents:bulkGenerate', { ids, templateFiles, signee }),
 

@@ -33,6 +33,11 @@ export default function App() {
     })
   }, [])
 
+  // Ανανέωση πληροφοριών (π.χ. ετικέτα σχολικού έτους) μετά από αλλαγές (προβιβασμός κ.λπ.).
+  useEffect(() => {
+    api.appInfo().then(setInfo)
+  }, [version])
+
   function showToast(text, type = 'ok') {
     setToast({ text, type })
     setTimeout(() => setToast(null), 6000)

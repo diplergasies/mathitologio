@@ -2,14 +2,17 @@ import { useEffect, useState } from 'react'
 import api from '../api'
 import StudentTable from '../components/StudentTable'
 import BulkEnrollModal from '../components/BulkEnrollModal'
+import BulkDeleteByDikaModal from '../components/BulkDeleteByDikaModal'
 import { useSelection } from '../useSelection'
 import { birthSortValue, proposedSortValue } from '../sort'
-import { GraduationCap, Trash2, Users } from 'lucide-react'
+import { GraduationCap, Trash2, Users, Hash } from 'lucide-react'
 
 const columns = [
   { key: 'eponymo', label: 'Επώνυμο' },
   { key: 'onoma', label: 'Όνομα' },
   { key: 'patronymo', label: 'Πατρώνυμο' },
+  { key: 'monada', label: 'Μονάδα' },
+  { key: 'dika', label: 'ΔΙΚΑ' },
   { key: 'fylo', label: 'Φύλο' },
   { key: 'imerominia_gennisis', label: 'Ημ. γέννησης', sortable: true, sortAccessor: birthSortValue },
   { key: 'ithageneia', label: 'Ιθαγένεια' },
@@ -28,6 +31,7 @@ const columns = [
 export default function Arrivals({ version, bump }) {
   const [students, setStudents] = useState([])
   const [bulkEnroll, setBulkEnroll] = useState(false)
+  const [dikaDelete, setDikaDelete] = useState(false)
   const sel = useSelection()
 
   function load() {
@@ -55,7 +59,15 @@ export default function Arrivals({ version, bump }) {
 
   return (
     <div>
-      <div className="mb-3 text-sm text-slate-500">{students.length} αφίξεις προς εγγραφή</div>
+      <div className="mb-3 flex items-center justify-between gap-3">
+        <span className="text-sm text-slate-500">{students.length} αφίξεις προς εγγραφή</span>
+        <button
+          onClick={() => setDikaDelete(true)}
+          className="inline-flex items-center gap-1.5 rounded-md border border-red-300 px-3 py-1.5 text-sm font-medium text-red-600 hover:bg-red-50"
+        >
+          <Hash size={15} /> Μαζική διαγραφή με ΔΙΚΑ
+        </button>
+      </div>
 
       {sel.ids.length > 0 && (
         <div className="mb-3 flex items-center gap-2 rounded-lg border border-blue-200 bg-blue-50 px-3 py-2 text-sm">
@@ -113,6 +125,17 @@ export default function Arrivals({ version, bump }) {
           onClose={() => setBulkEnroll(false)}
           onDone={() => {
             setBulkEnroll(false)
+            sel.clear()
+            bump()
+          }}
+        />
+      )}
+
+      {dikaDelete && (
+        <BulkDeleteByDikaModal
+          students={students}
+          onClose={() => setDikaDelete(false)}
+          onDeleted={() => {
             sel.clear()
             bump()
           }}
