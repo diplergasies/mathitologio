@@ -126,10 +126,14 @@ export default function StudentTable({
           Κανένας μαθητής δεν ταιριάζει με «{term}».
         </div>
       ) : (
-        <div className="overflow-x-auto rounded-lg border border-slate-200 bg-white">
+        // overflow-auto + φραγμένο ύψος: η οριζόντια μπάρα κύλισης μένει στο κάτω
+        // μέρος του ορατού πλαισίου (όχι στο τέλος ενός ψηλού πίνακα), ώστε να είναι
+        // πάντα προσβάσιμη όταν δεν φαίνονται όλες οι στήλες του μαθητή. Η κεφαλίδα
+        // γίνεται sticky για να μη χάνεται κατά την κάθετη κύλιση μέσα στο πλαίσιο.
+        <div className="max-h-[calc(100vh-15rem)] overflow-auto rounded-lg border border-slate-200 bg-white">
           <table className="w-full border-collapse text-sm">
             <thead>
-              <tr className="bg-slate-50 text-left text-slate-600">
+              <tr className="bg-slate-50 text-left text-slate-600 [&_th]:sticky [&_th]:top-0 [&_th]:z-10 [&_th]:bg-slate-50">
                 {selectable && (
                   <th className="w-8 px-3 py-2">
                     <input
