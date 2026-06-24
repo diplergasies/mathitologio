@@ -107,44 +107,91 @@ function findSoffice(resourcesPath, isDev) {
   return process.platform === 'win32' ? 'soffice.exe' : 'soffice'
 }
 
+// Μετατροπή path -> 8.3 short path στα Windows (ASCII-safe). Λύνει τη σιωπηλή
+// αποτυχία του LibreOffice όταν το path περιέχει μη-ASCII χαρακτήρες (π.χ. ελληνικό
+// όνομα χρήστη: C:\Users\Μαρία\...). Σε άλλα OS ή αν αποτύχει, επιστρέφει το αρχικό.
+// Το short name απαιτεί να υπάρχει το αρχείο/φάκελος· αλλιώς πέφτουμε στο αρχικό.
+const _shortPathCache = new Map()
+function winShortPath(p) {
+  if (process.platform !== 'win32' || !p) return p
+  if (_shortPathCache.has(p)) return _shortPathCache.get(p)
+  let resolved = p
+  try {
+    const out = spawnSync('cmd.exe', ['/d', '/c', `for %I in ("${p}") do @echo %~sI`], {
+      encoding: 'utf8',
+      windowsHide: true,
+    })
+    const s = (out.stdout || '').trim()
+    if (s && fs.existsSync(s)) resolved = s
+  } catch {}
+  _shortPathCache.set(p, resolved)
+  return resolved
+}
+
 // Μετατροπή pptx/docx -> pdf. Επιστρέφει το path του PDF.
 // profileDir: σταθερός (persistent) φάκελος προφίλ LibreOffice. Η 1η μετατροπή τον
 // δημιουργεί (αργή σε HDD + antivirus που σκανάρει το φρεσκο-εγκατεστημένο LO), οι
 // επόμενες τον επαναχρησιμοποιούν -> ~10x ταχύτερες (μετρήθηκε 26.9s ψυχρό vs 2.7s ζεστό).
 // Αν δεν δοθεί (π.χ. κλήση εκτός Electron), πέφτουμε σε σταθερό φάκελο στο tmp.
 function convertToPdf(srcPath, outDir, soffice, profileDir) {
-  const pptxPath = srcPath
-  const profile = profileDir || path.join(os.tmpdir(), 'mathitologio_lo_profile')
-  // Έγκυρο file:// URL και στα δύο OS: στα Windows δίνει file:///C:/... (τρία slashes),
-  // στο Linux/mac file:///tmp/... — το χειροκίνητο `file://`+path έσπαγε στα Windows
-  // (file://C:/... → το C: ερμηνευόταν ως host) και προκαλούσε «bootstrap.ini is corrupt».
-  const userInstallationUrl = pathToFileURL(profile).href
-  const result = spawnSync(
-    soffice,
-    [
-      '--headless',
-      '--norestore',
-      '--nolockcheck',
-      `-env:UserInstallation=${userInstallationUrl}`,
-      '--convert-to',
-      'pdf',
-      '--outdir',
-      outDir,
-      pptxPath,
-    ],
-    // Timeout 5': η πρώτη ψυχρή εκτέλεση σε αργό δίσκο (HDD) ενώ ο antivirus σκανάρει
-    // τα χιλιάδες αρχεία του LO μπορεί να ξεπεράσει τα 2' — το persistent profile
-    // επιταχύνει τις επόμενες, αλλά όχι την πρώτη.
-    { encoding: 'utf8', timeout: 300000 }
-  )
+  const baseProfile = profileDir || path.join(os.tmpdir(), 'mathitologio_lo_profile')
+  const pdfPath = path.join(outDir, path.basename(srcPath, path.extname(srcPath)) + '.pdf')
+
+  // Μία προσπάθεια μετατροπής με συγκεκριμένο προφίλ. Όλα τα paths περνάνε από
+  // 8.3 short form (ASCII-safe) ώστε να μην αποτυγχάνει σιωπηλά σε μη-ASCII path.
+  const attempt = (profile) => {
+    fs.mkdirSync(profile, { recursive: true })
+    // Έγκυρο file:// URL και στα δύο OS: στα Windows δίνει file:///C:/... (τρία slashes),
+    // στο Linux/mac file:///tmp/... — το χειροκίνητο `file://`+path έσπαγε στα Windows
+    // (file://C:/... → το C: ερμηνευόταν ως host) και προκαλούσε «bootstrap.ini is corrupt».
+    const userInstallationUrl = pathToFileURL(winShortPath(profile)).href
+    return spawnSync(
+      winShortPath(soffice),
+      [
+        '--headless',
+        '--norestore',
+        '--nolockcheck',
+        `-env:UserInstallation=${userInstallationUrl}`,
+        '--convert-to',
+        'pdf',
+        '--outdir',
+        winShortPath(outDir),
+        winShortPath(srcPath),
+      ],
+      // Timeout 5': η πρώτη ψυχρή εκτέλεση σε αργό δίσκο (HDD) ενώ ο antivirus σκανάρει
+      // τα χιλιάδες αρχεία του LO μπορεί να ξεπεράσει τα 2' — το persistent profile
+      // επιταχύνει τις επόμενες, αλλά όχι την πρώτη.
+      { encoding: 'utf8', timeout: 300000, windowsHide: true }
+    )
+  }
+
+  let result = attempt(baseProfile)
+  if (result.error) {
+    throw new Error(`Αποτυχία εκτέλεσης LibreOffice (${soffice}): ${result.error.message}`)
+  }
+
+  // Εφεδρικό: αν δεν βγήκε PDF, ξαναδοκίμασε ΜΙΑ φορά με φρέσκο, μοναδικό προφίλ.
+  // Καλύπτει κλειδωμένο/χαλασμένο persistent profile και υποκλοπή της μετατροπής από
+  // ήδη ανοιχτό LibreOffice/Quickstarter (το νέο προφίλ → νέο named pipe, ανεξάρτητο).
+  if (!fs.existsSync(pdfPath)) {
+    let freshProfile
+    try {
+      freshProfile = fs.mkdtempSync(path.join(os.tmpdir(), 'mathitologio_lo_p_'))
+      result = attempt(freshProfile)
+    } catch {}
+    try {
+      if (freshProfile) fs.rmSync(freshProfile, { recursive: true, force: true })
+    } catch {}
+  }
 
   if (result.error) {
     throw new Error(`Αποτυχία εκτέλεσης LibreOffice (${soffice}): ${result.error.message}`)
   }
-  const pdfPath = path.join(outDir, path.basename(pptxPath, path.extname(pptxPath)) + '.pdf')
   if (!fs.existsSync(pdfPath)) {
     throw new Error(
-      `Δεν δημιουργήθηκε PDF. Έξοδος LibreOffice: ${result.stdout || ''} ${result.stderr || ''}`
+      `Δεν δημιουργήθηκε PDF (exit=${result.status} signal=${result.signal || '-'} ` +
+        `timedOut=${result.timedOut ? 'ναι' : 'όχι'}). soffice=${soffice} · src=${srcPath} · ` +
+        `out=${outDir}. Έξοδος LibreOffice: ${(result.stdout || '').trim()} ${(result.stderr || '').trim()}`.trim()
     )
   }
   return pdfPath
@@ -176,7 +223,10 @@ function warmUpProfile({ templatePath, soffice, profileDir }) {
       return resolve(false)
     }
     const profile = profileDir || path.join(os.tmpdir(), 'mathitologio_lo_profile')
-    const userInstallationUrl = pathToFileURL(profile).href
+    try {
+      fs.mkdirSync(profile, { recursive: true })
+    } catch {}
+    const userInstallationUrl = pathToFileURL(winShortPath(profile)).href
 
     let done = false
     const finish = (ok) => {
@@ -191,7 +241,7 @@ function warmUpProfile({ templatePath, soffice, profileDir }) {
     let child
     try {
       child = spawn(
-        soffice,
+        winShortPath(soffice),
         [
           '--headless',
           '--norestore',
@@ -200,8 +250,8 @@ function warmUpProfile({ templatePath, soffice, profileDir }) {
           '--convert-to',
           'pdf',
           '--outdir',
-          outDir,
-          templatePath,
+          winShortPath(outDir),
+          winShortPath(templatePath),
         ],
         { stdio: 'ignore', windowsHide: true }
       )
