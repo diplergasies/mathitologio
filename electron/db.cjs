@@ -79,6 +79,13 @@ async function init(userDataDir) {
   db.run(SCHEMA)
   ensureColumn('students', 'deleted_at', 'TEXT')
   ensureColumn('students', 'enrolled_at', 'TEXT')
+  // Flags σχολείου για το Παρατηρητήριο (Α1.2/1.3/1.4). Ανεξάρτητα μεταξύ τους.
+  ensureColumn('schools', 'dyep', 'INTEGER NOT NULL DEFAULT 0') // έχει ΔΥΕΠ
+  ensureColumn('schools', 'ty', 'INTEGER NOT NULL DEFAULT 0') // λειτουργεί Τμήμα Υποδοχής
+  // Flags μαθητή (Α1.5 / Α3.1) + λόγος διαγραφής (Γ1/Γ2).
+  ensureColumn('students', 'asynodeftos', "TEXT NOT NULL DEFAULT 'Όχι'")
+  ensureColumn('students', 'eidiki_agogi', "TEXT NOT NULL DEFAULT 'Όχι'")
+  ensureColumn('students', 'deletion_reason', 'TEXT')
   // Backfill: παλαιότεροι εγγεγραμμένοι χωρίς enrolled_at -> updated_at/created_at (καλύτερη εκτίμηση).
   db.run(
     `UPDATE students SET enrolled_at = COALESCE(updated_at, created_at)

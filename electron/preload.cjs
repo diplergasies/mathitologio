@@ -10,13 +10,14 @@ contextBridge.exposeInMainWorld('api', {
   enrollOptions: (id) => ipcRenderer.invoke('students:enrollOptions', id),
   enroll: (id, schoolId) => ipcRenderer.invoke('students:enroll', { id, schoolId }),
   setSchool: (id, schoolId) => ipcRenderer.invoke('students:setSchool', { id, schoolId }),
-  deleteStudent: (id) => ipcRenderer.invoke('students:delete', id),
+  deleteStudent: (id, reason) => ipcRenderer.invoke('students:delete', { id, reason }),
   restoreStudent: (id) => ipcRenderer.invoke('students:restore', id),
   updateStudent: (id, fields) => ipcRenderer.invoke('students:update', { id, fields }),
 
   listSchools: () => ipcRenderer.invoke('schools:list'),
-  addSchool: (name, type) => ipcRenderer.invoke('schools:add', { name, type }),
-  updateSchool: (id, name, type) => ipcRenderer.invoke('schools:update', { id, name, type }),
+  addSchool: (name, type, dyep, ty) => ipcRenderer.invoke('schools:add', { name, type, dyep, ty }),
+  updateSchool: (id, name, type, dyep, ty) =>
+    ipcRenderer.invoke('schools:update', { id, name, type, dyep, ty }),
   deleteSchool: (id) => ipcRenderer.invoke('schools:delete', id),
 
   gradesForType: (type) => ipcRenderer.invoke('grades:forType', type),
@@ -28,10 +29,12 @@ contextBridge.exposeInMainWorld('api', {
   setSchoolYear: (nipYear) => ipcRenderer.invoke('schoolYear:set', nipYear),
 
   listTemplates: () => ipcRenderer.invoke('documents:list'),
+  addTemplate: () => ipcRenderer.invoke('templates:add'),
+  deleteTemplate: (file) => ipcRenderer.invoke('templates:delete', file),
   generateDocument: (id, templateFile, signee) =>
     ipcRenderer.invoke('documents:generate', { id, templateFile, signee }),
 
-  bulkDelete: (ids) => ipcRenderer.invoke('students:bulkDelete', ids),
+  bulkDelete: (ids, reason) => ipcRenderer.invoke('students:bulkDelete', { ids, reason }),
   bulkRestore: (ids) => ipcRenderer.invoke('students:bulkRestore', ids),
   purgeStudent: (id) => ipcRenderer.invoke('students:purge', id),
   bulkPurge: (ids) => ipcRenderer.invoke('students:bulkPurge', ids),
@@ -45,9 +48,13 @@ contextBridge.exposeInMainWorld('api', {
 
   exportBackup: () => ipcRenderer.invoke('backup:export'),
   importBackup: () => ipcRenderer.invoke('backup:import'),
+  chooseBackupFolder: () => ipcRenderer.invoke('backup:chooseFolder'),
+  backupNow: () => ipcRenderer.invoke('backup:now'),
+  listBackups: () => ipcRenderer.invoke('backup:list'),
 
   appInfo: () => ipcRenderer.invoke('app:info'),
   getReadme: () => ipcRenderer.invoke('help:readme'),
 
   monthlyStats: (period) => ipcRenderer.invoke('stats:monthly', period),
+  observatoryStats: (period) => ipcRenderer.invoke('stats:observatory', period),
 })

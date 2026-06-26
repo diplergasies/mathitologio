@@ -8,12 +8,16 @@ export default function Schools({ version, bump }) {
   const [schools, setSchools] = useState([])
   const [name, setName] = useState('')
   const [type, setType] = useState('Δημοτικό')
+  const [dyep, setDyep] = useState(false)
+  const [ty, setTy] = useState(false)
   const [error, setError] = useState(null)
 
   // Κατάσταση επεξεργασίας γραμμής
   const [editId, setEditId] = useState(null)
   const [editName, setEditName] = useState('')
   const [editType, setEditType] = useState('')
+  const [editDyep, setEditDyep] = useState(false)
+  const [editTy, setEditTy] = useState(false)
 
   function load() {
     api.listSchools().then((r) => setSchools(r || []))
@@ -23,9 +27,11 @@ export default function Schools({ version, bump }) {
   async function add() {
     setError(null)
     if (!name.trim()) return
-    const res = await api.addSchool(name.trim(), type)
+    const res = await api.addSchool(name.trim(), type, dyep, ty)
     if (res && res.error) return setError(res.error)
     setName('')
+    setDyep(false)
+    setTy(false)
     bump()
   }
 
@@ -33,13 +39,15 @@ export default function Schools({ version, bump }) {
     setEditId(s.id)
     setEditName(s.name)
     setEditType(s.type)
+    setEditDyep(!!s.dyep)
+    setEditTy(!!s.ty)
     setError(null)
   }
 
   async function saveEdit() {
     setError(null)
     if (!editName.trim()) return
-    const res = await api.updateSchool(editId, editName.trim(), editType)
+    const res = await api.updateSchool(editId, editName.trim(), editType, editDyep, editTy)
     if (res && res.error) return setError(res.error)
     setEditId(null)
     bump()
@@ -84,6 +92,14 @@ export default function Schools({ version, bump }) {
               ))}
             </select>
           </div>
+          <label className="flex items-center gap-1.5 pb-2 text-sm text-slate-600">
+            <input type="checkbox" checked={dyep} onChange={(e) => setDyep(e.target.checked)} />
+            ΔΥΕΠ
+          </label>
+          <label className="flex items-center gap-1.5 pb-2 text-sm text-slate-600">
+            <input type="checkbox" checked={ty} onChange={(e) => setTy(e.target.checked)} />
+            Τμήμα Υποδοχής
+          </label>
           <button
             onClick={add}
             className="inline-flex items-center gap-1 rounded-md bg-blue-600 px-3 py-2 text-sm font-medium text-white hover:bg-blue-700"
@@ -100,13 +116,15 @@ export default function Schools({ version, bump }) {
             <tr className="bg-slate-50 text-left text-slate-600">
               <th className="px-3 py-2 font-semibold">Όνομα</th>
               <th className="px-3 py-2 font-semibold">Τύπος</th>
+              <th className="px-3 py-2 text-center font-semibold">ΔΥΕΠ</th>
+              <th className="px-3 py-2 text-center font-semibold">Τ.Υ.</th>
               <th className="px-3 py-2 text-right font-semibold">Ενέργειες</th>
             </tr>
           </thead>
           <tbody>
             {schools.length === 0 ? (
               <tr>
-                <td colSpan={3} className="px-3 py-6 text-center text-slate-400">
+                <td colSpan={5} className="px-3 py-6 text-center text-slate-400">
                   Δεν υπάρχουν σχολεία.
                 </td>
               </tr>
@@ -135,6 +153,20 @@ export default function Schools({ version, bump }) {
                         ))}
                       </select>
                     </td>
+                    <td className="px-3 py-2 text-center">
+                      <input
+                        type="checkbox"
+                        checked={editDyep}
+                        onChange={(e) => setEditDyep(e.target.checked)}
+                      />
+                    </td>
+                    <td className="px-3 py-2 text-center">
+                      <input
+                        type="checkbox"
+                        checked={editTy}
+                        onChange={(e) => setEditTy(e.target.checked)}
+                      />
+                    </td>
                     <td className="px-3 py-2 text-right">
                       <div className="flex justify-end gap-1">
                         <button
@@ -160,6 +192,12 @@ export default function Schools({ version, bump }) {
                       {s.name}
                     </td>
                     <td className="px-3 py-2 text-slate-500">{s.type}</td>
+                    <td className="px-3 py-2 text-center">
+                      {s.dyep ? <span className="text-green-600">✓</span> : <span className="text-slate-300">—</span>}
+                    </td>
+                    <td className="px-3 py-2 text-center">
+                      {s.ty ? <span className="text-green-600">✓</span> : <span className="text-slate-300">—</span>}
+                    </td>
                     <td className="px-3 py-2 text-right">
                       <div className="flex justify-end gap-1">
                         <button

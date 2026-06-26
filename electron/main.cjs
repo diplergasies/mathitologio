@@ -28,6 +28,18 @@ function templatesDir() {
     : path.join(process.resourcesPath, 'templates')
 }
 
+// Φάκελος προτύπων χρήστη — επιβιώνει στα updates (όπως η βάση & το προφίλ LibreOffice).
+function userTemplatesDir() {
+  return path.join(app.getPath('userData'), 'templates')
+}
+
+// Επίλυση διαδρομής προτύπου: τα πρότυπα χρήστη υπερισχύουν των ενσωματωμένων (ίδιο όνομα).
+function resolveTemplatePath(file) {
+  const u = path.join(userTemplatesDir(), file)
+  if (fs.existsSync(u)) return u
+  return path.join(templatesDir(), file)
+}
+
 function nowIso() {
   return new Date().toISOString()
 }
@@ -72,6 +84,9 @@ function buildDocData(s, cfg) {
     'Ημερομηνία': todayDisplay(),
   }
 }
+
+// Όλα τα tokens που γεμίζει η εφαρμογή (για προειδοποίηση άγνωστων σε πρότυπα χρήστη).
+const KNOWN_TOKENS = Object.keys(buildDocData({}, {})).concat(['signee', 'signee.prop'])
 
 // Υπολογισμός υπογράφοντα ({{signee}}, {{signee.prop}}) βάσει της επιλογής του χρήστη.
 // choice: { type: 'father'|'mother'|'sep'|'other', name?, prop? }
@@ -235,7 +250,8 @@ ipcMain.handle('import:xlsx', async () => {
 function studentsByStatus(status) {
   return db.query(
     `SELECT s.*, b.color_index AS batch_color, b.school_year AS batch_year,
-            b.imported_at AS batch_imported_at, sc.name AS school_name, sc.type AS school_type
+            b.imported_at AS batch_imported_at, sc.name AS school_name, sc.type AS school_type,
+            sc.dyep AS school_dyep, sc.ty AS school_ty
        FROM students s
        LEFT JOIN batches b ON b.id = s.batch_id
        LEFT JOIN schools sc ON sc.id = s.school_id
@@ -302,10 +318,10 @@ ipcMain.handle('students:setSchool', (_e, { id, schoolId }) => {
   return { ok: true }
 })
 
-ipcMain.handle('students:delete', (_e, id) => {
+ipcMain.handle('students:delete', (_e, { id, reason } = {}) => {
   db.run(
-    `UPDATE students SET prev_status=status, status='deleted', deleted_at=$now, updated_at=$now WHERE id=$id`,
-    { $now: nowIso(), $id: id }
+    `UPDATE students SET prev_status=status, status='deleted', deleted_at=$now, deletion_reason=$r, updated_at=$now WHERE id=$id`,
+    { $now: nowIso(), $r: reason || null, $id: id }
   )
   return { ok: true }
 })
@@ -314,7 +330,7 @@ ipcMain.handle('students:restore', (_e, id) => {
   const rows = db.query('SELECT prev_status FROM students WHERE id=$id', { $id: id })
   const prev = rows.length && rows[0].prev_status ? rows[0].prev_status : 'arrival'
   db.run(
-    `UPDATE students SET status=$prev, prev_status=NULL, deleted_at=NULL, updated_at=$now WHERE id=$id`,
+    `UPDATE students SET status=$prev, prev_status=NULL, deleted_at=NULL, deletion_reason=NULL, updated_at=$now WHERE id=$id`,
     { $prev: prev, $now: nowIso(), $id: id }
   )
   return { ok: true, status: prev }
@@ -331,6 +347,18 @@ ipcMain.handle('students:update', (_e, { id, fields }) => {
     sets.push('epitropos=$ep')
     params.$ep = fields.epitropos
   }
+  if (fields.asynodeftos !== undefined) {
+    sets.push('asynodeftos=$as')
+    params.$as = fields.asynodeftos
+  }
+  if (fields.eidiki_agogi !== undefined) {
+    sets.push('eidiki_agogi=$ea')
+    params.$ea = fields.eidiki_agogi
+  }
+  if (fields.deletion_reason !== undefined) {
+    sets.push('deletion_reason=$dr')
+    params.$dr = fields.deletion_reason || null
+  }
   if (!sets.length) return { ok: true }
   db.run(`UPDATE students SET ${sets.join(', ')}, updated_at=$now WHERE id=$id`, params)
   return { ok: true }
@@ -338,11 +366,14 @@ ipcMain.handle('students:update', (_e, { id, fields }) => {
 
 // ---- Μαζικές ενέργειες ----------------------------------------------------
 
-ipcMain.handle('students:bulkDelete', (_e, ids = []) => {
+ipcMain.handle('students:bulkDelete', (_e, payload = []) => {
+  // Συμβατότητα: δέχεται είτε πίνακα ids είτε { ids, reason }.
+  const ids = Array.isArray(payload) ? payload : payload.ids || []
+  const reason = Array.isArray(payload) ? null : payload.reason || null
   ids.forEach((id) =>
     db.run(
-      `UPDATE students SET prev_status=status, status='deleted', deleted_at=$now, updated_at=$now WHERE id=$id`,
-      { $now: nowIso(), $id: id }
+      `UPDATE students SET prev_status=status, status='deleted', deleted_at=$now, deletion_reason=$r, updated_at=$now WHERE id=$id`,
+      { $now: nowIso(), $r: reason, $id: id }
     )
   )
   return { ok: true, count: ids.length }
@@ -353,7 +384,7 @@ ipcMain.handle('students:bulkRestore', (_e, ids = []) => {
     const rows = db.query('SELECT prev_status FROM students WHERE id=$id', { $id: id })
     const prev = rows.length && rows[0].prev_status ? rows[0].prev_status : 'arrival'
     db.run(
-      `UPDATE students SET status=$p, prev_status=NULL, deleted_at=NULL, updated_at=$now WHERE id=$id`,
+      `UPDATE students SET status=$p, prev_status=NULL, deleted_at=NULL, deletion_reason=NULL, updated_at=$now WHERE id=$id`,
       { $p: prev, $now: nowIso(), $id: id }
     )
   })
@@ -524,7 +555,7 @@ ipcMain.handle('documents:bulkGenerate', async (_e, { ids = [], templateFiles = 
       data['signee.prop'] = sg.prop
     }
     for (const tf of templateFiles) {
-      const templatePath = path.join(templatesDir(), tf)
+      const templatePath = resolveTemplatePath(tf)
       if (!fs.existsSync(templatePath)) {
         failed.push(`${tf} (λείπει)`)
         continue
@@ -555,10 +586,15 @@ ipcMain.handle('schools:list', () =>
   db.query('SELECT * FROM schools ORDER BY type, name COLLATE NOCASE')
 )
 
-ipcMain.handle('schools:add', (_e, { name, type }) => {
+ipcMain.handle('schools:add', (_e, { name, type, dyep, ty }) => {
   if (!name || !type) return { error: 'Συμπλήρωσε όνομα και τύπο' }
   if (!grades.SCHOOL_TYPES.includes(type)) return { error: 'Μη έγκυρος τύπος σχολείου' }
-  const id = db.run('INSERT INTO schools (name, type) VALUES ($n, $t)', { $n: name, $t: type })
+  const id = db.run('INSERT INTO schools (name, type, dyep, ty) VALUES ($n, $t, $d, $ty)', {
+    $n: name,
+    $t: type,
+    $d: dyep ? 1 : 0,
+    $ty: ty ? 1 : 0,
+  })
   return { ok: true, id }
 })
 
@@ -574,10 +610,16 @@ ipcMain.handle('schools:delete', (_e, id) => {
   return { ok: true }
 })
 
-ipcMain.handle('schools:update', (_e, { id, name, type }) => {
+ipcMain.handle('schools:update', (_e, { id, name, type, dyep, ty }) => {
   if (!name || !type) return { error: 'Συμπλήρωσε όνομα και τύπο' }
   if (!grades.SCHOOL_TYPES.includes(type)) return { error: 'Μη έγκυρος τύπος σχολείου' }
-  db.run('UPDATE schools SET name=$n, type=$t WHERE id=$id', { $n: name, $t: type, $id: id })
+  db.run('UPDATE schools SET name=$n, type=$t, dyep=$d, ty=$ty WHERE id=$id', {
+    $n: name,
+    $t: type,
+    $d: dyep ? 1 : 0,
+    $ty: ty ? 1 : 0,
+    $id: id,
+  })
   return { ok: true }
 })
 
@@ -602,24 +644,71 @@ ipcMain.handle('settings:set', (_e, obj) => {
 })
 
 ipcMain.handle('documents:list', () => {
-  const dir = templatesDir()
-  if (!fs.existsSync(dir)) return []
-  return fs
-    .readdirSync(dir)
-    .filter((f) => /\.(pptx|docx)$/i.test(f))
-    .map((f) => {
-      let tokens = []
-      try {
-        tokens = documents.extractTokens(path.join(dir, f))
-      } catch {
-        tokens = []
-      }
-      return {
-        file: f,
-        label: f.replace(/\.(pptx|docx)$/i, ''),
-        needsSignee: tokens.includes('signee') || tokens.includes('signee.prop'),
-      }
-    })
+  // Σάρωση ενσωματωμένων + προτύπων χρήστη. Σε σύγκρουση ονόματος υπερισχύει το πρότυπο χρήστη.
+  const byFile = new Map()
+  const scan = (dir, builtin) => {
+    if (!fs.existsSync(dir)) return
+    fs.readdirSync(dir)
+      .filter((f) => /\.(pptx|docx)$/i.test(f))
+      .forEach((f) => {
+        let tokens = []
+        try {
+          tokens = documents.extractTokens(path.join(dir, f))
+        } catch {
+          tokens = []
+        }
+        byFile.set(f, {
+          file: f,
+          label: f.replace(/\.(pptx|docx)$/i, ''),
+          needsSignee: tokens.includes('signee') || tokens.includes('signee.prop'),
+          builtin,
+          tokens,
+          unknownTokens: tokens.filter((t) => !KNOWN_TOKENS.includes(t)),
+        })
+      })
+  }
+  scan(templatesDir(), true)
+  scan(userTemplatesDir(), false) // υπερισχύει
+  return [...byFile.values()]
+})
+
+// Προσθήκη προτύπων χρήστη (αντιγραφή .docx/.pptx στον φάκελο userData/templates).
+ipcMain.handle('templates:add', async () => {
+  const { canceled, filePaths } = await dialog.showOpenDialog({
+    title: 'Προσθήκη προτύπων εγγράφων',
+    properties: ['openFile', 'multiSelections'],
+    filters: [{ name: 'Πρότυπα', extensions: ['docx', 'pptx'] }],
+  })
+  if (canceled || !filePaths.length) return { canceled: true }
+  const dir = userTemplatesDir()
+  fs.mkdirSync(dir, { recursive: true })
+  const added = []
+  const failed = []
+  for (const src of filePaths) {
+    try {
+      const name = path.basename(src)
+      fs.copyFileSync(src, path.join(dir, name)) // overwrite αν υπάρχει
+      added.push(name)
+    } catch (err) {
+      failed.push(`${path.basename(src)}: ${err.message}`)
+    }
+  }
+  return { ok: true, added, failed }
+})
+
+// Διαγραφή προτύπου χρήστη (μόνο όσα βρίσκονται στον φάκελο userData/templates).
+ipcMain.handle('templates:delete', (_e, file) => {
+  const dir = userTemplatesDir()
+  const target = path.join(dir, path.basename(file || ''))
+  // Ασφάλεια: το αρχείο πρέπει να είναι μέσα στον φάκελο χρήστη.
+  if (path.dirname(target) !== dir) return { error: 'Μη έγκυρο αρχείο.' }
+  if (!fs.existsSync(target)) return { error: 'Τα ενσωματωμένα πρότυπα δεν διαγράφονται.' }
+  try {
+    fs.unlinkSync(target)
+    return { ok: true }
+  } catch (err) {
+    return { error: err.message }
+  }
 })
 
 ipcMain.handle('documents:generate', async (_e, { id, templateFile, signee }) => {
@@ -632,7 +721,7 @@ ipcMain.handle('documents:generate', async (_e, { id, templateFile, signee }) =>
   if (!rows.length) return { error: 'Δεν βρέθηκε ο μαθητής' }
   const s = rows[0]
 
-  const templatePath = path.join(templatesDir(), templateFile)
+  const templatePath = resolveTemplatePath(templateFile)
   if (!fs.existsSync(templatePath)) return { error: 'Δεν βρέθηκε το template' }
 
   const cfg = db.getAllSettings()
@@ -694,6 +783,92 @@ ipcMain.handle('backup:import', async () => {
   const buf = fs.readFileSync(filePaths[0])
   db.replaceFromBuffer(buf)
   return { ok: true }
+})
+
+// ---- Αυτόματα αντίγραφα ασφαλείας -----------------------------------------
+
+const BACKUP_PREFIX = 'mathitologio_backup_'
+
+// Συχνότητα -> ημέρες (0 = ανενεργό).
+function freqDays(freq) {
+  if (freq === 'daily') return 1
+  if (freq === 'weekly') return 7
+  if (freq === 'monthly') return 30
+  return 0
+}
+
+// Ταξινομήσιμη χρονοσφραγίδα τοπικής ώρας: YYYY-MM-DD_HH-mm-ss.
+function backupStamp(d = new Date()) {
+  const p = (n) => String(n).padStart(2, '0')
+  return (
+    `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())}` +
+    `_${p(d.getHours())}-${p(d.getMinutes())}-${p(d.getSeconds())}`
+  )
+}
+
+// Δημιουργία αντιγράφου (force = αγνοεί συχνότητα/περίοδο, για χειροκίνητο «Backup τώρα»).
+function runAutoBackup({ force = false } = {}) {
+  try {
+    const s = db.getAllSettings()
+    const freq = s.backupFrequency || 'off'
+    const folder = s.backupFolder || ''
+    if (!force) {
+      if (freq === 'off' || !folder) return { skipped: true }
+      const days = freqDays(freq)
+      const last = s.backupLastAt ? Date.parse(s.backupLastAt) : 0
+      if (last && Date.now() - last < days * 86400000) return { skipped: true, notDue: true }
+    }
+    if (!folder) return { error: 'Δεν έχει οριστεί φάκελος αντιγράφων.' }
+
+    fs.mkdirSync(folder, { recursive: true })
+    db.save() // εξασφάλισε ότι το αρχείο στον δίσκο είναι ενημερωμένο
+    const dest = path.join(folder, `${BACKUP_PREFIX}${backupStamp()}.sqlite`)
+    fs.copyFileSync(db.getDbPath(), dest)
+    db.setSettings({ backupLastAt: new Date().toISOString() })
+
+    // Rotation: κράτα μόνο τα τελευταία N.
+    const keep = Math.max(1, parseInt(s.backupKeep, 10) || 10)
+    const files = fs
+      .readdirSync(folder)
+      .filter((f) => f.startsWith(BACKUP_PREFIX) && f.endsWith('.sqlite'))
+      .sort()
+      .reverse()
+    for (const f of files.slice(keep)) {
+      try {
+        fs.unlinkSync(path.join(folder, f))
+      } catch {
+        // αγνόησε αποτυχία διαγραφής μεμονωμένου αρχείου
+      }
+    }
+    return { ok: true, path: dest }
+  } catch (err) {
+    return { error: err.message }
+  }
+}
+
+ipcMain.handle('backup:chooseFolder', async () => {
+  const { canceled, filePaths } = await dialog.showOpenDialog({
+    title: 'Επιλογή φακέλου αντιγράφων ασφαλείας',
+    properties: ['openDirectory', 'createDirectory'],
+    defaultPath: path.join(app.getPath('documents'), 'Μαθητολόγιο-Backups'),
+  })
+  if (canceled || !filePaths.length) return { canceled: true }
+  return { path: filePaths[0] }
+})
+
+ipcMain.handle('backup:now', () => runAutoBackup({ force: true }))
+
+ipcMain.handle('backup:list', () => {
+  const folder = db.getAllSettings().backupFolder || ''
+  if (!folder || !fs.existsSync(folder)) return []
+  return fs
+    .readdirSync(folder)
+    .filter((f) => f.startsWith(BACKUP_PREFIX) && f.endsWith('.sqlite'))
+    .map((name) => {
+      const st = fs.statSync(path.join(folder, name))
+      return { name, size: st.size, mtime: st.mtimeMs }
+    })
+    .sort((a, b) => b.mtime - a.mtime)
 })
 
 // ---- Αποτύπωση / μηνιαία στατιστικά ---------------------------------------
@@ -825,6 +1000,96 @@ ipcMain.handle('stats:monthly', (_e, period) => {
   }
 })
 
+// Παρατηρητήριο: εγγραφές μέσα σε ένα 15νθήμερο (βάσει enrolled_at).
+// period = { year, month, half }, half: 1 (1–15) ή 2 (16–τέλος μήνα).
+ipcMain.handle('stats:observatory', (_e, period) => {
+  const now = new Date()
+  const year = Number(period && period.year) || now.getFullYear()
+  const month = Number(period && period.month) || now.getMonth() + 1
+  const half = Number(period && period.half) === 2 ? 2 : 1
+
+  const startIso =
+    half === 1
+      ? new Date(Date.UTC(year, month - 1, 1, 0, 0, 0)).toISOString()
+      : new Date(Date.UTC(year, month - 1, 16, 0, 0, 0)).toISOString()
+  const endIso =
+    half === 1
+      ? new Date(Date.UTC(year, month - 1, 16, 0, 0, 0)).toISOString()
+      : nextMonthBoundIso(year, month)
+
+  // Όσοι ΕΓΓΡΑΦΗΚΑΝ μέσα στο 15νθήμερο (ακόμη κι αν διαγράφηκαν αργότερα).
+  const rows = db.query(
+    `SELECT s.fylo, s.computed_type, s.asynodeftos, s.eidiki_agogi,
+            sc.id AS school_id, sc.name AS school_name, sc.type AS school_type,
+            sc.dyep AS school_dyep, sc.ty AS school_ty
+       FROM students s LEFT JOIN schools sc ON sc.id = s.school_id
+      WHERE s.enrolled_at >= $start AND s.enrolled_at < $end
+        AND s.status IN ('enrolled', 'deleted')
+        AND (s.status = 'enrolled' OR s.prev_status = 'enrolled')`,
+    { $start: startIso, $end: endIso }
+  )
+
+  const levelTotals = { 'Πρωτοβάθμια': 0, 'Δευτεροβάθμια': 0, 'Άλλο': 0 }
+  const schoolMap = new Map() // key -> { name, type, total }
+  let total = 0
+  let dyep = 0
+  let withTY = 0
+  let withoutTY = 0
+  let eidiki = 0
+  let asynodeftoi = 0
+
+  for (const s of rows) {
+    total++
+    const category = s.school_type || s.computed_type || 'Άλλο'
+    levelTotals[levelOf(category)] += 1
+
+    const key = s.school_id != null ? `id:${s.school_id}` : 'none'
+    if (!schoolMap.has(key)) {
+      schoolMap.set(key, {
+        name: s.school_id != null ? s.school_name : 'Χωρίς σχολείο',
+        type: s.school_id != null ? s.school_type : '',
+        total: 0,
+      })
+    }
+    schoolMap.get(key).total += 1
+
+    // Α1.2/1.3/1.4 — ανεξάρτητα flags σχολείου (μπορεί να επικαλύπτονται).
+    if (s.school_dyep) dyep++
+    if (s.school_ty) withTY++
+    else withoutTY++
+
+    if (s.eidiki_agogi === 'Ναι') eidiki++
+    if (s.asynodeftos === 'Ναι') asynodeftoi++
+  }
+
+  const byLevel = ['Πρωτοβάθμια', 'Δευτεροβάθμια'].map((lv) => ({ level: lv, total: levelTotals[lv] }))
+
+  const TYPE_RANK = { 'Νηπιαγωγείο': 1, 'Δημοτικό': 2, 'Γυμνάσιο': 3, 'Λύκειο': 4, 'ΕΠΑΛ': 5 }
+  const bySchool = [...schoolMap.values()].sort((a, b) => {
+    if (a.type === '' && b.type !== '') return 1
+    if (b.type === '' && a.type !== '') return -1
+    const ta = TYPE_RANK[a.type] || 99
+    const tb = TYPE_RANK[b.type] || 99
+    if (ta !== tb) return ta - tb
+    return a.name.localeCompare(b.name, 'el')
+  })
+
+  return {
+    year,
+    month,
+    half,
+    period: `${GREEK_MONTHS[month - 1]} ${year} — ${half === 1 ? '1–15' : '16–τέλος'}`,
+    total,
+    byLevel,
+    bySchool,
+    dyep,
+    withTY,
+    withoutTY,
+    eidiki,
+    asynodeftoi,
+  }
+})
+
 // Προθέρμανση LibreOffice στην 1η εκκίνηση (όταν δεν υπάρχει ακόμη το persistent
 // προφίλ): αθόρυβη μετατροπή ενός template σε background, ώστε η πρώτη πραγματική
 // έκδοση εγγράφου να μη χτυπήσει την ψυχρή καθυστέρηση (DLLs + προφίλ + antivirus).
@@ -852,6 +1117,12 @@ app.whenReady().then(async () => {
   await db.init(app.getPath('userData'))
   createWindow()
   warmUpLibreOffice() // fire-and-forget· δεν μπλοκάρει την εκκίνηση
+  // Αυτόματο backup στο άνοιγμα, αν έχει περάσει η περίοδος που όρισε ο χρήστης.
+  try {
+    runAutoBackup()
+  } catch (e) {
+    console.error('auto-backup', e)
+  }
   app.on('activate', () => {
     if (BrowserWindow.getAllWindows().length === 0) createWindow()
   })

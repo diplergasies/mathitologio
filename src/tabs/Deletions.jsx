@@ -2,7 +2,7 @@ import { useEffect, useState } from 'react'
 import api from '../api'
 import StudentTable from '../components/StudentTable'
 import { useSelection } from '../useSelection'
-import { Undo2, Users, Trash2 } from 'lucide-react'
+import { Undo2, Users, Trash2, Pencil, Check, X } from 'lucide-react'
 
 function fmtDeleted(iso) {
   if (!iso) return '—'
@@ -12,27 +12,81 @@ function fmtDeleted(iso) {
   return `${p(d.getDate())}/${p(d.getMonth() + 1)}/${d.getFullYear()} ${p(d.getHours())}:${p(d.getMinutes())}`
 }
 
-const columns = [
-  { key: 'eponymo', label: 'Επώνυμο' },
-  { key: 'onoma', label: 'Όνομα' },
-  { key: 'patronymo', label: 'Πατρώνυμο' },
-  { key: 'monada', label: 'Μονάδα' },
-  { key: 'dika', label: 'ΔΙΚΑ' },
-  { key: 'fylo', label: 'Φύλο' },
-  { key: 'imerominia_gennisis', label: 'Ημ. γέννησης' },
-  { key: 'school_name', label: 'Σχολείο' },
-  { key: 'current_grade', label: 'Τάξη' },
-  { key: 'deleted_at', label: 'Ημ. διαγραφής', render: (s) => fmtDeleted(s.deleted_at) },
-  {
-    key: 'prev_status',
-    label: 'Επιστροφή σε',
-    render: (s) => (s.prev_status === 'enrolled' ? 'Μαθητές' : 'Αφίξεις'),
-  },
-]
-
 export default function Deletions({ version, bump }) {
   const [students, setStudents] = useState([])
+  const [editId, setEditId] = useState(null)
+  const [editReason, setEditReason] = useState('')
   const sel = useSelection()
+
+  function startEditReason(s) {
+    setEditId(s.id)
+    setEditReason(s.deletion_reason || '')
+  }
+
+  async function saveReason() {
+    await api.updateStudent(editId, { deletion_reason: editReason.trim() })
+    setEditId(null)
+    bump()
+  }
+
+  const columns = [
+    { key: 'eponymo', label: 'Επώνυμο' },
+    { key: 'onoma', label: 'Όνομα' },
+    { key: 'patronymo', label: 'Πατρώνυμο' },
+    { key: 'monada', label: 'Μονάδα' },
+    { key: 'dika', label: 'ΔΙΚΑ' },
+    { key: 'fylo', label: 'Φύλο' },
+    { key: 'imerominia_gennisis', label: 'Ημ. γέννησης' },
+    { key: 'school_name', label: 'Σχολείο' },
+    { key: 'current_grade', label: 'Τάξη' },
+    { key: 'deleted_at', label: 'Ημ. διαγραφής', render: (s) => fmtDeleted(s.deleted_at) },
+    {
+      key: 'deletion_reason',
+      label: 'Λόγος διαγραφής',
+      render: (s) =>
+        editId === s.id ? (
+          <div className="flex items-center gap-1">
+            <input
+              value={editReason}
+              onChange={(e) => setEditReason(e.target.value)}
+              onKeyDown={(e) => e.key === 'Enter' && saveReason()}
+              autoFocus
+              className="w-40 rounded-md border border-slate-300 px-2 py-1 text-sm"
+            />
+            <button
+              onClick={saveReason}
+              title="Αποθήκευση"
+              className="rounded-md border border-green-200 p-1 text-green-700 hover:bg-green-50"
+            >
+              <Check size={14} />
+            </button>
+            <button
+              onClick={() => setEditId(null)}
+              title="Άκυρο"
+              className="rounded-md border border-slate-200 p-1 text-slate-500 hover:bg-slate-50"
+            >
+              <X size={14} />
+            </button>
+          </div>
+        ) : (
+          <button
+            onClick={() => startEditReason(s)}
+            title="Επεξεργασία λόγου"
+            className="inline-flex items-center gap-1 text-left text-slate-600 hover:text-blue-600"
+          >
+            <span className={s.deletion_reason ? '' : 'text-slate-300'}>
+              {s.deletion_reason || '—'}
+            </span>
+            <Pencil size={12} className="text-slate-400" />
+          </button>
+        ),
+    },
+    {
+      key: 'prev_status',
+      label: 'Επιστροφή σε',
+      render: (s) => (s.prev_status === 'enrolled' ? 'Μαθητές' : 'Αφίξεις'),
+    },
+  ]
 
   function load() {
     api.listStudents('deleted').then((r) => setStudents(r || []))

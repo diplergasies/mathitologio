@@ -2,7 +2,7 @@ import { useEffect, useState } from 'react'
 import api from '../api'
 import Schools from './Schools'
 import PromotionModal from '../components/PromotionModal'
-import { UserCog, Save, School, CalendarRange, GraduationCap } from 'lucide-react'
+import { UserCog, Save, School, CalendarRange, GraduationCap, DatabaseBackup, FolderOpen, Play, FileText, FilePlus2, Trash2, AlertTriangle } from 'lucide-react'
 
 // Ζωντανός υπολογισμός εύρους ετών ανά τύπο, από το έτος προνηπίου P.
 function tableFor(P) {
@@ -123,6 +123,295 @@ function SchoolYearSection({ bump }) {
   )
 }
 
+function fmtDateTime(iso) {
+  if (!iso) return '—'
+  const d = new Date(iso)
+  if (isNaN(d)) return '—'
+  const p = (n) => String(n).padStart(2, '0')
+  return `${p(d.getDate())}/${p(d.getMonth() + 1)}/${d.getFullYear()} ${p(d.getHours())}:${p(d.getMinutes())}`
+}
+
+const FREQ_OPTIONS = [
+  { value: 'off', label: 'Ανενεργό' },
+  { value: 'daily', label: 'Καθημερινά' },
+  { value: 'weekly', label: 'Εβδομαδιαία' },
+  { value: 'monthly', label: 'Μηνιαία' },
+]
+
+function BackupSection() {
+  const [freq, setFreq] = useState('off')
+  const [folder, setFolder] = useState('')
+  const [keep, setKeep] = useState('10')
+  const [lastAt, setLastAt] = useState('')
+  const [count, setCount] = useState(0)
+  const [saved, setSaved] = useState(false)
+  const [msg, setMsg] = useState(null) // { text, type }
+  const [busy, setBusy] = useState(false)
+
+  function reload() {
+    api.getSettings().then((s) => {
+      if (!s) return
+      setFreq(s.backupFrequency || 'off')
+      setFolder(s.backupFolder || '')
+      setKeep(s.backupKeep || '10')
+      setLastAt(s.backupLastAt || '')
+    })
+    api.listBackups().then((list) => setCount(Array.isArray(list) ? list.length : 0))
+  }
+  useEffect(reload, [])
+
+  async function chooseFolder() {
+    const res = await api.chooseBackupFolder()
+    if (res && res.path) {
+      setFolder(res.path)
+      await api.setSettings({ backupFolder: res.path })
+      reload()
+    }
+  }
+
+  async function save() {
+    const k = String(Math.max(1, parseInt(keep, 10) || 10))
+    setKeep(k)
+    await api.setSettings({ backupFrequency: freq, backupKeep: k })
+    setSaved(true)
+    setTimeout(() => setSaved(false), 3000)
+  }
+
+  async function backupNow() {
+    setBusy(true)
+    setMsg(null)
+    const res = await api.backupNow()
+    setBusy(false)
+    if (res && res.ok) {
+      setMsg({ text: 'Το αντίγραφο δημιουργήθηκε.', type: 'ok' })
+      reload()
+    } else {
+      setMsg({ text: (res && res.error) || 'Αποτυχία δημιουργίας αντιγράφου.', type: 'error' })
+    }
+  }
+
+  const needsFolder = freq !== 'off' && !folder
+
+  return (
+    <div className="rounded-lg border border-slate-200 bg-white p-4">
+      <h3 className="mb-1 flex items-center gap-2 font-semibold text-slate-700">
+        <DatabaseBackup size={18} /> Αυτόματα αντίγραφα ασφαλείας
+      </h3>
+      <p className="mb-3 text-xs text-slate-400">
+        Αντίγραφο όλων των δεδομένων αποθηκεύεται τοπικά στον φάκελο που θα ορίσεις, με τη συχνότητα
+        που επιλέγεις. Ο έλεγχος γίνεται κάθε φορά που ανοίγει η εφαρμογή.
+      </p>
+
+      <div className="mb-3 flex flex-wrap items-end gap-3">
+        <div>
+          <label className="mb-1 block text-sm text-slate-600">Συχνότητα</label>
+          <select
+            value={freq}
+            onChange={(e) => setFreq(e.target.value)}
+            className="rounded-md border border-slate-300 px-3 py-2 text-sm"
+          >
+            {FREQ_OPTIONS.map((o) => (
+              <option key={o.value} value={o.value}>
+                {o.label}
+              </option>
+            ))}
+          </select>
+        </div>
+        <div>
+          <label className="mb-1 block text-sm text-slate-600">Κράτα τα τελευταία</label>
+          <input
+            type="number"
+            min={1}
+            value={keep}
+            onChange={(e) => setKeep(e.target.value)}
+            className="w-24 rounded-md border border-slate-300 px-3 py-2 text-sm"
+          />
+        </div>
+        <button
+          onClick={save}
+          className="inline-flex items-center gap-1.5 rounded-md bg-blue-600 px-3 py-2 text-sm font-medium text-white hover:bg-blue-700"
+        >
+          <Save size={16} /> Αποθήκευση
+        </button>
+        {saved && <span className="pb-2 text-sm text-green-600">Αποθηκεύτηκε ✓</span>}
+      </div>
+
+      <div className="mb-3">
+        <label className="mb-1 block text-sm text-slate-600">Φάκελος αποθήκευσης</label>
+        <div className="flex flex-wrap items-center gap-2">
+          <span className="min-w-0 flex-1 truncate rounded-md border border-slate-200 bg-slate-50 px-3 py-2 text-sm text-slate-600">
+            {folder || 'Δεν έχει οριστεί φάκελος'}
+          </span>
+          <button
+            onClick={chooseFolder}
+            className="inline-flex items-center gap-1.5 rounded-md border border-slate-300 px-3 py-2 text-sm text-slate-600 hover:bg-slate-50"
+          >
+            <FolderOpen size={16} /> Επιλογή φακέλου
+          </button>
+        </div>
+        {needsFolder && (
+          <p className="mt-1 text-sm text-amber-600">
+            Διάλεξε φάκελο για να ενεργοποιηθούν τα αυτόματα αντίγραφα.
+          </p>
+        )}
+      </div>
+
+      <div className="flex flex-wrap items-center gap-3 border-t border-slate-100 pt-3">
+        <button
+          onClick={backupNow}
+          disabled={busy || !folder}
+          className="inline-flex items-center gap-1.5 rounded-md bg-emerald-600 px-3 py-2 text-sm font-medium text-white hover:bg-emerald-700 disabled:opacity-40"
+        >
+          <Play size={16} /> {busy ? 'Γίνεται…' : 'Backup τώρα'}
+        </button>
+        <span className="text-xs text-slate-500">
+          Τελευταίο: <strong>{fmtDateTime(lastAt)}</strong> · Αρχεία στον φάκελο: <strong>{count}</strong>
+        </span>
+        {msg && (
+          <span className={`text-sm ${msg.type === 'error' ? 'text-red-600' : 'text-green-600'}`}>
+            {msg.text}
+          </span>
+        )}
+      </div>
+    </div>
+  )
+}
+
+function TemplatesSection() {
+  const [templates, setTemplates] = useState([])
+  const [msg, setMsg] = useState(null) // { text, type }
+  const [busy, setBusy] = useState(false)
+
+  function reload() {
+    api.listTemplates().then((r) => setTemplates(Array.isArray(r) ? r : []))
+  }
+  useEffect(reload, [])
+
+  async function add() {
+    setBusy(true)
+    setMsg(null)
+    const res = await api.addTemplate()
+    setBusy(false)
+    if (res && res.canceled) return
+    if (res && res.ok) {
+      const n = (res.added || []).length
+      setMsg({ text: n ? `Προστέθηκαν ${n} πρότυπα.` : 'Δεν προστέθηκε κάτι.', type: 'ok' })
+      reload()
+    } else {
+      setMsg({ text: (res && res.error) || 'Αποτυχία προσθήκης.', type: 'error' })
+    }
+  }
+
+  async function remove(t) {
+    if (!confirm(`Διαγραφή του προτύπου «${t.label}»;`)) return
+    const res = await api.deleteTemplate(t.file)
+    if (res && res.error) return setMsg({ text: res.error, type: 'error' })
+    setMsg({ text: 'Το πρότυπο διαγράφηκε.', type: 'ok' })
+    reload()
+  }
+
+  return (
+    <div className="rounded-lg border border-slate-200 bg-white p-4">
+      <h3 className="mb-1 flex items-center gap-2 font-semibold text-slate-700">
+        <FileText size={18} /> Πρότυπα εγγράφων
+      </h3>
+      <p className="mb-3 text-xs text-slate-400">
+        Πρόσθεσε δικά σου πρότυπα <strong>.docx</strong> / <strong>.pptx</strong> με tokens της μορφής{' '}
+        {'{{Όνομα}}'} (δες τη Βοήθεια για τη λίστα). Αποθηκεύονται τοπικά και διατηρούνται στις ενημερώσεις.
+      </p>
+
+      <div className="mb-3 flex flex-wrap items-center gap-3">
+        <button
+          onClick={add}
+          disabled={busy}
+          className="inline-flex items-center gap-1.5 rounded-md bg-blue-600 px-3 py-2 text-sm font-medium text-white hover:bg-blue-700 disabled:opacity-40"
+        >
+          <FilePlus2 size={16} /> {busy ? 'Γίνεται…' : 'Προσθήκη προτύπου'}
+        </button>
+        {msg && (
+          <span className={`text-sm ${msg.type === 'error' ? 'text-red-600' : 'text-green-600'}`}>
+            {msg.text}
+          </span>
+        )}
+      </div>
+
+      <div className="overflow-hidden rounded-lg border border-slate-200">
+        <table className="w-full text-sm">
+          <thead>
+            <tr className="bg-slate-50 text-left text-slate-600">
+              <th className="px-3 py-2 font-semibold">Πρότυπο</th>
+              <th className="px-3 py-2 font-semibold">Tokens</th>
+              <th className="px-3 py-2 text-right font-semibold">Ενέργειες</th>
+            </tr>
+          </thead>
+          <tbody>
+            {templates.length === 0 ? (
+              <tr>
+                <td colSpan={3} className="px-3 py-6 text-center text-slate-400">
+                  Δεν υπάρχουν πρότυπα.
+                </td>
+              </tr>
+            ) : (
+              templates.map((t) => (
+                <tr key={t.file} className="border-t border-slate-100 align-top">
+                  <td className="px-3 py-2">
+                    <div className="font-medium text-slate-700">{t.label}</div>
+                    <span
+                      className={`mt-1 inline-block rounded px-1.5 py-0.5 text-xs font-medium ${
+                        t.builtin ? 'bg-slate-100 text-slate-500' : 'bg-blue-100 text-blue-700'
+                      }`}
+                    >
+                      {t.builtin ? 'Ενσωματωμένο' : 'Δικό μου'}
+                    </span>
+                  </td>
+                  <td className="px-3 py-2">
+                    <div className="flex flex-wrap gap-1">
+                      {(t.tokens || []).length === 0 ? (
+                        <span className="text-slate-400">—</span>
+                      ) : (
+                        t.tokens.map((tok) => (
+                          <span
+                            key={tok}
+                            className={`rounded px-1.5 py-0.5 text-xs ${
+                              (t.unknownTokens || []).includes(tok)
+                                ? 'bg-amber-100 text-amber-700'
+                                : 'bg-slate-100 text-slate-600'
+                            }`}
+                          >
+                            {tok}
+                          </span>
+                        ))
+                      )}
+                    </div>
+                    {(t.unknownTokens || []).length > 0 && (
+                      <p className="mt-1 flex items-center gap-1 text-xs text-amber-600">
+                        <AlertTriangle size={12} /> Άγνωστα tokens — δεν συμπληρώνονται.
+                      </p>
+                    )}
+                  </td>
+                  <td className="px-3 py-2 text-right">
+                    {t.builtin ? (
+                      <span className="text-xs text-slate-300">—</span>
+                    ) : (
+                      <button
+                        onClick={() => remove(t)}
+                        title="Διαγραφή"
+                        className="rounded-md border border-red-200 p-1 text-red-600 hover:bg-red-50"
+                      >
+                        <Trash2 size={14} />
+                      </button>
+                    )}
+                  </td>
+                </tr>
+              ))
+            )}
+          </tbody>
+        </table>
+      </div>
+    </div>
+  )
+}
+
 export default function Settings({ version, bump }) {
   const [form, setForm] = useState({ sep: '', nomos: '', domi: '', perif: '' })
   const [saved, setSaved] = useState(false)
@@ -192,6 +481,10 @@ export default function Settings({ version, bump }) {
       </div>
 
       <SchoolYearSection bump={bump} />
+
+      <BackupSection />
+
+      <TemplatesSection />
 
       <div>
         <h3 className="mb-2 flex items-center gap-2 font-semibold text-slate-700">

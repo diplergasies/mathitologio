@@ -4,6 +4,7 @@ import StudentTable from '../components/StudentTable'
 import DocumentModal from '../components/DocumentModal'
 import BulkDocumentModal from '../components/BulkDocumentModal'
 import BulkDeleteByDikaModal from '../components/BulkDeleteByDikaModal'
+import DeleteReasonModal from '../components/DeleteReasonModal'
 import SchoolCell from '../components/SchoolCell'
 import GradeCell from '../components/GradeCell'
 import { useSelection } from '../useSelection'
@@ -15,6 +16,8 @@ export default function Students({ version, bump }) {
   const [docFor, setDocFor] = useState(null)
   const [bulkDoc, setBulkDoc] = useState(false)
   const [dikaDelete, setDikaDelete] = useState(false)
+  const [delFor, setDelFor] = useState(null) // μαθητής προς διαγραφή (single)
+  const [bulkDel, setBulkDel] = useState(false) // μαζική διαγραφή επιλεγμένων
   const sel = useSelection()
 
   function load() {
@@ -22,21 +25,18 @@ export default function Students({ version, bump }) {
   }
   useEffect(load, [version])
 
-  async function del(s) {
-    if (!confirm(`Διαγραφή του μαθητή ${s.eponymo} ${s.onoma};`)) return
-    await api.deleteStudent(s.id)
-    bump()
-  }
-
   async function toggleEpitropos(s) {
     await api.updateStudent(s.id, { epitropos: s.epitropos === 'Ναι' ? 'Όχι' : 'Ναι' })
     bump()
   }
 
-  async function bulkDelete() {
-    if (!confirm(`Μαζική διαγραφή ${sel.ids.length} μαθητών;`)) return
-    await api.bulkDelete(sel.ids)
-    sel.clear()
+  async function toggleAsyn(s) {
+    await api.updateStudent(s.id, { asynodeftos: s.asynodeftos === 'Ναι' ? 'Όχι' : 'Ναι' })
+    bump()
+  }
+
+  async function toggleEidiki(s) {
+    await api.updateStudent(s.id, { eidiki_agogi: s.eidiki_agogi === 'Ναι' ? 'Όχι' : 'Ναι' })
     bump()
   }
 
@@ -76,6 +76,34 @@ export default function Students({ version, bump }) {
         </button>
       ),
     },
+    {
+      key: 'asynodeftos',
+      label: 'Ασυνόδευτος',
+      render: (s) => (
+        <button
+          onClick={() => toggleAsyn(s)}
+          className={`rounded px-2 py-0.5 text-xs font-medium ${
+            s.asynodeftos === 'Ναι' ? 'bg-amber-100 text-amber-700' : 'bg-slate-100 text-slate-500'
+          }`}
+        >
+          {s.asynodeftos || 'Όχι'}
+        </button>
+      ),
+    },
+    {
+      key: 'eidiki_agogi',
+      label: 'Ειδ. αγωγή',
+      render: (s) => (
+        <button
+          onClick={() => toggleEidiki(s)}
+          className={`rounded px-2 py-0.5 text-xs font-medium ${
+            s.eidiki_agogi === 'Ναι' ? 'bg-purple-100 text-purple-700' : 'bg-slate-100 text-slate-500'
+          }`}
+        >
+          {s.eidiki_agogi || 'Όχι'}
+        </button>
+      ),
+    },
   ]
 
   return (
@@ -102,7 +130,7 @@ export default function Students({ version, bump }) {
               <FileText size={14} /> Μαζική έκδοση εγγράφων
             </button>
             <button
-              onClick={bulkDelete}
+              onClick={() => setBulkDel(true)}
               className="inline-flex items-center gap-1 rounded-md border border-red-300 bg-white px-2.5 py-1 text-xs font-medium text-red-600 hover:bg-red-50"
             >
               <Trash2 size={14} /> Μαζική διαγραφή
@@ -130,7 +158,7 @@ export default function Students({ version, bump }) {
               <FileText size={14} />
             </button>
             <button
-              onClick={() => del(s)}
+              onClick={() => setDelFor(s)}
               title="Διαγραφή"
               className="rounded-md border border-red-200 p-1 text-red-600 hover:bg-red-50"
             >
@@ -142,6 +170,32 @@ export default function Students({ version, bump }) {
 
       {docFor && <DocumentModal student={docFor} onClose={() => setDocFor(null)} />}
       {bulkDoc && <BulkDocumentModal ids={sel.ids} onClose={() => setBulkDoc(false)} />}
+
+      {delFor && (
+        <DeleteReasonModal
+          title="Διαγραφή μαθητή"
+          message={`Διαγραφή του μαθητή ${delFor.eponymo} ${delFor.onoma};`}
+          onConfirm={async (reason) => {
+            await api.deleteStudent(delFor.id, reason)
+            bump()
+          }}
+          onClose={() => setDelFor(null)}
+        />
+      )}
+
+      {bulkDel && (
+        <DeleteReasonModal
+          title="Μαζική διαγραφή"
+          message={`Μαζική διαγραφή ${sel.ids.length} μαθητών;`}
+          count={`${sel.ids.length} μαθητών`}
+          onConfirm={async (reason) => {
+            await api.bulkDelete(sel.ids, reason)
+            sel.clear()
+            bump()
+          }}
+          onClose={() => setBulkDel(false)}
+        />
+      )}
 
       {dikaDelete && (
         <BulkDeleteByDikaModal

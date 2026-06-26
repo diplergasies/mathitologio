@@ -13,6 +13,7 @@ function normDika(v) {
 export default function BulkDeleteByDikaModal({ students, onClose, onDeleted }) {
   const [text, setText] = useState('')
   const [preview, setPreview] = useState(null) // { matched: [...], notFound: [...] }
+  const [reason, setReason] = useState('')
   const [busy, setBusy] = useState(false)
 
   function search() {
@@ -44,7 +45,7 @@ export default function BulkDeleteByDikaModal({ students, onClose, onDeleted }) 
 
   async function confirmDelete() {
     setBusy(true)
-    await api.bulkDelete(preview.matched.map((s) => s.id))
+    await api.bulkDelete(preview.matched.map((s) => s.id), reason.trim())
     setBusy(false)
     onDeleted(preview.matched.length)
     onClose()
@@ -133,6 +134,21 @@ export default function BulkDeleteByDikaModal({ students, onClose, onDeleted }) 
             <p className="rounded-md bg-slate-50 p-2 text-slate-500">
               Κανένας μαθητής δεν βρέθηκε με τους ΔΙΚΑ που έδωσες σε αυτήν την καρτέλα.
             </p>
+          )}
+
+          {preview.matched.length > 0 && (
+            <div>
+              <label className="mb-1 block text-sm text-slate-600">
+                Λόγος διαγραφής (προαιρετικό)
+              </label>
+              <textarea
+                value={reason}
+                onChange={(e) => setReason(e.target.value)}
+                rows={2}
+                placeholder="π.χ. αναχώρηση από τη δομή, μετεγγραφή…"
+                className="w-full rounded-md border border-slate-300 px-3 py-2 text-sm focus:border-blue-400 focus:outline-none"
+              />
+            </div>
           )}
 
           {preview.notFound.length > 0 && (

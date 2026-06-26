@@ -9,5 +9,8 @@ resources/libreoffice/*
 samples/
 *.sqlite
 
+# Διπλότυπο top-level templates/ (τα πραγματικά πρότυπα είναι στο resources/templates/)
+/templates/
+
 *.log
 .DS_Store
