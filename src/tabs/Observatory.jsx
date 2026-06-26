@@ -8,20 +8,44 @@ const MONTHS = [
   'Ιούλιος', 'Αύγουστος', 'Σεπτέμβριος', 'Οκτώβριος', 'Νοέμβριος', 'Δεκέμβριος',
 ]
 
-// Επεξεργάσιμο πεδίο με κουμπί αντιγραφής.
-function Field({ label, value, onChange, hint }) {
+// Βαθμίδα από τον τύπο σχολείου (frontend grouping).
+function levelOfType(t) {
+  if (t === 'Νηπιαγωγείο' || t === 'Δημοτικό') return 'Πρωτοβάθμια'
+  if (t === 'Γυμνάσιο' || t === 'Λύκειο' || t === 'ΕΠΑΛ') return 'Δευτεροβάθμια'
+  return 'Άλλο'
+}
+
+// Σύνθετο κείμενο για το πεδίο Α1 (λίστα ανά βαθμίδα + σχολεία με πλήθος + σύνολο).
+function buildA1Text(data) {
+  const lines = []
+  for (const lvName of ['Πρωτοβάθμια', 'Δευτεροβάθμια']) {
+    const total = data.byLevel.find((l) => l.level === lvName)?.total ?? 0
+    lines.push(`${lvName}: ${total}`)
+    const schools = data.bySchool.filter((s) => levelOfType(s.type) === lvName)
+    lines.push(
+      `Σχολεία εγγραφής: ${
+        schools.length ? schools.map((s) => `${s.name} (${s.total})`).join(', ') : '—'
+      }`
+    )
+  }
+  lines.push(`Σύνολο: ${data.total}`)
+  return lines.join('\n')
+}
+
+// Επεξεργάσιμο πεδίο με έτοιμο κείμενο + κουμπί αντιγραφής ολόκληρου του κειμένου.
+function FieldText({ label, value, onChange, rows = 1 }) {
   return (
-    <div className="flex items-center gap-3 border-t border-slate-100 px-3 py-2 first:border-t-0">
-      <div className="min-w-0 flex-1">
-        <div className="text-sm text-slate-700">{label}</div>
-        {hint && <div className="text-xs text-slate-400">{hint}</div>}
+    <div className="border-t border-slate-100 px-3 py-2 first:border-t-0">
+      <div className="mb-1 flex items-center justify-between gap-2">
+        <span className="text-sm font-medium text-slate-700">{label}</span>
+        <CopyButton value={value} />
       </div>
-      <input
+      <textarea
         value={value ?? ''}
         onChange={(e) => onChange(e.target.value)}
-        className="w-28 rounded-md border border-slate-300 px-2 py-1 text-right text-sm"
+        rows={rows}
+        className="w-full whitespace-pre rounded-md border border-slate-300 px-2 py-1 font-mono text-sm"
       />
-      <CopyButton value={value} />
     </div>
   )
 }
@@ -43,27 +67,23 @@ export default function Observatory({ version }) {
   const [year, setYear] = useState(now.getFullYear())
   const [half, setHalf] = useState(now.getDate() <= 15 ? 1 : 2)
   const [data, setData] = useState(null)
-  const [vals, setVals] = useState({}) // επεξεργάσιμες τιμές πεδίων
+  const [vals, setVals] = useState({}) // επεξεργάσιμα κείμενα ανά πεδίο φόρμας
 
   useEffect(() => {
     api.observatoryStats({ year, month, half }).then(setData)
   }, [year, month, half, version])
 
-  // Αρχικοποίηση των επεξεργάσιμων τιμών από τα υπολογισμένα δεδομένα.
+  // Αρχικοποίηση των επεξεργάσιμων κειμένων από τα υπολογισμένα δεδομένα.
   useEffect(() => {
     if (!data) return
-    const v = {
-      total: data.total,
-      'level:Πρωτοβάθμια': data.byLevel.find((l) => l.level === 'Πρωτοβάθμια')?.total ?? 0,
-      'level:Δευτεροβάθμια': data.byLevel.find((l) => l.level === 'Δευτεροβάθμια')?.total ?? 0,
-      dyep: data.dyep,
-      withTY: data.withTY,
-      withoutTY: data.withoutTY,
-      eidiki: data.eidiki,
-      asynodeftoi: data.asynodeftoi,
-    }
-    data.bySchool.forEach((s, i) => (v[`school:${i}`] = s.total))
-    setVals(v)
+    setVals({
+      a1: buildA1Text(data),
+      dyep: `ΔΥΕΠ: ${data.dyep}`,
+      ty: `Με Τμήμα Υποδοχής: ${data.withTY}`,
+      noty: `Χωρίς Τμήμα Υποδοχής: ${data.withoutTY}`,
+      eidiki: `Ειδική αγωγή/αναπηρία: ${data.eidiki}`,
+      asyn: `Ασυνόδευτοι: ${data.asynodeftoi}`,
+    })
   }, [data])
 
   if (!data) return null
@@ -121,45 +141,26 @@ export default function Observatory({ version }) {
 
       <p className="text-sm text-slate-500">
         Νέες εγγραφές περιόδου <span className="font-medium text-slate-700">{data.period}</span> —
-        σύνολο <span className="font-medium text-slate-700">{data.total}</span>. Οι τιμές είναι
-        επεξεργάσιμες πριν την αντιγραφή στη φόρμα του Παρατηρητηρίου.
+        σύνολο <span className="font-medium text-slate-700">{data.total}</span>. Κάθε πεδίο είναι
+        επεξεργάσιμο· το κουμπί αντιγράφει ολόκληρο το κείμενο για επικόλληση στη φόρμα του Παρατηρητηρίου.
       </p>
 
-      {/* Α1 — ανά βαθμίδα */}
-      <Section icon={Layers} title="Α1 — Εγγραφές ανά βαθμίδα">
-        <Field label="Πρωτοβάθμια" value={vals['level:Πρωτοβάθμια']} onChange={set('level:Πρωτοβάθμια')} />
-        <Field label="Δευτεροβάθμια" value={vals['level:Δευτεροβάθμια']} onChange={set('level:Δευτεροβάθμια')} />
-        <Field label="Σύνολο" value={vals.total} onChange={set('total')} />
-      </Section>
-
-      {/* Α1 — ανά σχολείο */}
-      <Section icon={School} title="Α1 — Εγγραφές ανά σχολείο">
-        {data.bySchool.length === 0 ? (
-          <div className="px-3 py-4 text-center text-sm text-slate-400">Καμία εγγραφή σε αυτό το 15νθήμερο.</div>
-        ) : (
-          data.bySchool.map((s, i) => (
-            <Field
-              key={i}
-              label={s.name}
-              hint={s.type || undefined}
-              value={vals[`school:${i}`]}
-              onChange={set(`school:${i}`)}
-            />
-          ))
-        )}
+      {/* Α1 — εγγραφές ανά βαθμίδα & σχολείο */}
+      <Section icon={Layers} title="Α1 — Εγγραφές">
+        <FieldText label="Α1 — Εγγραφές ανά βαθμίδα & σχολείο" value={vals.a1} onChange={set('a1')} rows={6} />
       </Section>
 
       {/* Α1.2–1.4 — τύπος προγράμματος */}
       <Section icon={School} title="Α1.2–1.4 — Τύπος προγράμματος">
-        <Field label="Α1.2 — ΔΥΕΠ" value={vals.dyep} onChange={set('dyep')} />
-        <Field label="Α1.3 — με Τμήμα Υποδοχής" value={vals.withTY} onChange={set('withTY')} />
-        <Field label="Α1.4 — χωρίς Τμήμα Υποδοχής" value={vals.withoutTY} onChange={set('withoutTY')} />
+        <FieldText label="Α1.2 — ΔΥΕΠ" value={vals.dyep} onChange={set('dyep')} />
+        <FieldText label="Α1.3 — με Τμήμα Υποδοχής" value={vals.ty} onChange={set('ty')} />
+        <FieldText label="Α1.4 — χωρίς Τμήμα Υποδοχής" value={vals.noty} onChange={set('noty')} />
       </Section>
 
       {/* Α1.5 & Α3.1 */}
       <Section icon={Accessibility} title="Α1.5 / Α3.1 — Ειδικές κατηγορίες">
-        <Field label="Α1.5 — Ειδική αγωγή / αναπηρία" value={vals.eidiki} onChange={set('eidiki')} />
-        <Field label="Α3.1 — Ασυνόδευτοι" value={vals.asynodeftoi} onChange={set('asynodeftoi')} />
+        <FieldText label="Α1.5 — Ειδική αγωγή / αναπηρία" value={vals.eidiki} onChange={set('eidiki')} />
+        <FieldText label="Α3.1 — Ασυνόδευτοι" value={vals.asyn} onChange={set('asyn')} />
       </Section>
     </div>
   )
