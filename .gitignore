@@ -8,6 +8,11 @@ resources/libreoffice/*
 # (πραγματικές λίστες πληθυσμού με προσωπικά δεδομένα ανηλίκων)
 samples/
 *.sqlite
+# Λίστες/εξαγωγές με προσωπικά δεδομένα (π.χ. ΣΕΠ) στη ρίζα — PDF & Excel.
+# Μόνο στη ρίζα, ώστε να μην επηρεάζονται τα πρότυπα στο resources/templates/.
+/*.pdf
+/*.xlsx
+/*.xls
 
 # Διπλότυπο top-level templates/ (τα πραγματικά πρότυπα είναι στο resources/templates/)
 /templates/
