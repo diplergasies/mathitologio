@@ -5,6 +5,7 @@ const { contextBridge, ipcRenderer } = require('electron')
 // Ασφαλές API προς το renderer (χωρίς nodeIntegration).
 contextBridge.exposeInMainWorld('api', {
   importXlsx: () => ipcRenderer.invoke('import:xlsx'),
+  importPdf: () => ipcRenderer.invoke('import:pdf'),
 
   listStudents: (status) => ipcRenderer.invoke('students:list', status),
   enrollOptions: (id) => ipcRenderer.invoke('students:enrollOptions', id),

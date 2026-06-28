@@ -161,7 +161,3 @@ npm run dist     # δημιουργία installer .exe (Windows) στο release/
 - Για PC χωρίς Office, τοποθέτησε portable LibreOffice στο `resources/libreoffice/` (το `soffice(.exe)`
   ή τον φάκελο `program/`).
 - Το τελικό `.exe` χτίζεται καλύτερα σε Windows ή GitHub Actions (windows runner).
-
----
-
-*Δημιουργήθηκε από τον Κατσιαντρίδη Χρήστο — e-mail: katsanx@sch.gr*

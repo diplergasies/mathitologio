@@ -7,7 +7,7 @@ import Settings from './tabs/Settings'
 import Report from './tabs/Report'
 import Observatory from './tabs/Observatory'
 import HelpModal from './components/HelpModal'
-import { Upload, Download, Database, PlaneLanding, Users, Trash2, Settings as SettingsIcon, BarChart3, ClipboardList, BookOpen, HelpCircle } from 'lucide-react'
+import { Upload, FileText, Download, Database, PlaneLanding, Users, Trash2, Settings as SettingsIcon, BarChart3, ClipboardList, BookOpen, HelpCircle } from 'lucide-react'
 
 const TABS = [
   { id: 'arrivals', label: 'Αφίξεις', icon: PlaneLanding, Comp: Arrivals },
@@ -45,16 +45,28 @@ export default function App() {
     setTimeout(() => setToast(null), 6000)
   }
 
-  async function doImport() {
-    const res = await api.importXlsx()
+  function reportImport(res) {
     if (!res || res.canceled) return
+    if (res.error) {
+      showToast(res.error, 'warn')
+      return
+    }
     let msg = `Εισαγωγή: ${res.imported} μαθητές σχολικής ηλικίας προστέθηκαν στις Αφίξεις.`
     if (res.excluded) msg += ` ${res.excluded} εξαιρέθηκαν (εκτός σχολικής ηλικίας).`
+    if (res.duplicates) msg += ` ${res.duplicates} παραλείφθηκαν ως διπλά (ίδιο ΔΙΚΑ).`
     if (res.missingFields && res.missingFields.length)
       msg += ` Προσοχή: δεν εντοπίστηκαν στήλες: ${res.missingFields.join(', ')}.`
     showToast(msg, res.missingFields && res.missingFields.length ? 'warn' : 'ok')
     setTab('arrivals')
     bump()
+  }
+
+  async function doImport() {
+    reportImport(await api.importXlsx())
+  }
+
+  async function doImportPdf() {
+    reportImport(await api.importPdf())
   }
 
   async function doExport() {
@@ -93,6 +105,13 @@ export default function App() {
             className="inline-flex items-center gap-1.5 rounded-md bg-blue-600 px-3 py-2 text-sm font-medium text-white hover:bg-blue-700"
           >
             <Upload size={16} /> Εισαγωγή XLSX
+          </button>
+          <button
+            onClick={doImportPdf}
+            title="Εισαγωγή λίστας από PDF (π.χ. ΣΕΠ)"
+            className="inline-flex items-center gap-1.5 rounded-md bg-blue-600 px-3 py-2 text-sm font-medium text-white hover:bg-blue-700"
+          >
+            <FileText size={16} /> Εισαγωγή από PDF
           </button>
           <button
             onClick={doExport}
@@ -135,15 +154,6 @@ export default function App() {
         >
           <HelpCircle size={16} /> Βοήθεια
         </button>
-
-        <div className="ml-auto pr-2 text-right text-xs leading-tight text-slate-400">
-          Δημιουργήθηκε από τον Κατσιαντρίδη Χρήστο
-          <br />
-          e-mail:{' '}
-          <a href="mailto:katsanx@sch.gr" className="text-slate-500 hover:text-blue-600">
-            katsanx@sch.gr
-          </a>
-        </div>
       </nav>
 
       <main className="flex-1 overflow-auto p-5">{Active && <Active version={version} bump={bump} />}</main>

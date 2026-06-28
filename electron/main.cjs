@@ -173,16 +173,10 @@ ipcMain.handle('schoolYear:set', (_e, nipYear) => {
   return { ok: true, schoolYearStart: S, table: grades.gradeTable(S) }
 })
 
-ipcMain.handle('import:xlsx', async () => {
-  const { canceled, filePaths } = await dialog.showOpenDialog({
-    title: 'Επιλογή αρχείου μαθητών',
-    properties: ['openFile'],
-    filters: [{ name: 'Φύλλα εργασίας', extensions: ['xlsx', 'xls'] }],
-  })
-  if (canceled || !filePaths.length) return { canceled: true }
-
-  const filePath = filePaths[0]
-  const { records, missingFields, totalRows } = importer.parseFile(filePath)
+// Κοινή λογική εισαγωγής (XLSX ή PDF): δημιουργία batch, έλεγχος διπλών ΔΙΚΑ, εισαγωγή.
+// parsed = { records, missingFields, totalRows } (από importer.parseFile ή importer.parsePdf).
+function insertRecords(filePath, parsed) {
+  const { records, missingFields, totalRows } = parsed
 
   const syStart = getSchoolYearStart()
   const syLabel = grades.schoolYearLabel(syStart)
@@ -197,15 +191,31 @@ ipcMain.handle('import:xlsx', async () => {
     { $a: nowIso(), $f: path.basename(filePath), $y: syLabel, $c: colorIndex }
   )
 
+  // Έλεγχος διπλών ΔΙΚΑ: σε σχέση με ενεργούς μαθητές (άφιξη/εγγεγραμμένοι) ΚΑΙ μέσα στο ίδιο
+  // αρχείο. Οι διαγραμμένοι ΔΕΝ μετράνε (επιτρέπεται επανεμφάνιση). Κενά ΔΙΚΑ δεν θεωρούνται διπλά.
+  const existing = new Set(
+    db
+      .query("SELECT dika FROM students WHERE dika != '' AND status IN ('arrival','enrolled')")
+      .map((r) => String(r.dika).trim())
+  )
+  const seenInFile = new Set()
+
   const afixis = todayDisplay()
   let imported = 0
   let excluded = 0
-
   let skipped = 0
+  let duplicates = 0
+
   for (const r of records) {
     // Παράλειψη κενών/άκυρων γραμμών (χωρίς όνομα, επώνυμο και ΔΙΚΑ).
     if (!r.eponymo && !r.onoma && !r.dika) {
       skipped++
+      continue
+    }
+    // Παράλειψη διπλών ΔΙΚΑ.
+    const dika = String(r.dika || '').trim()
+    if (dika && (existing.has(dika) || seenInFile.has(dika))) {
+      duplicates++
       continue
     }
     const cls = r.birth_year != null ? grades.classify(r.birth_year, syStart) : null
@@ -241,10 +251,36 @@ ipcMain.handle('import:xlsx', async () => {
         $now: nowIso(),
       }
     )
+    if (dika) seenInFile.add(dika)
     imported++
   }
 
-  return { canceled: false, imported, excluded, totalRows, missingFields, batchId }
+  return { canceled: false, imported, excluded, duplicates, totalRows, missingFields, batchId }
+}
+
+ipcMain.handle('import:xlsx', async () => {
+  const { canceled, filePaths } = await dialog.showOpenDialog({
+    title: 'Επιλογή αρχείου μαθητών',
+    properties: ['openFile'],
+    filters: [{ name: 'Φύλλα εργασίας', extensions: ['xlsx', 'xls'] }],
+  })
+  if (canceled || !filePaths.length) return { canceled: true }
+  return insertRecords(filePaths[0], importer.parseFile(filePaths[0]))
+})
+
+ipcMain.handle('import:pdf', async () => {
+  const { canceled, filePaths } = await dialog.showOpenDialog({
+    title: 'Επιλογή αρχείου PDF μαθητών',
+    properties: ['openFile'],
+    filters: [{ name: 'PDF', extensions: ['pdf'] }],
+  })
+  if (canceled || !filePaths.length) return { canceled: true }
+  try {
+    const parsed = await importer.parsePdf(filePaths[0])
+    return insertRecords(filePaths[0], parsed)
+  } catch (err) {
+    return { canceled: false, error: `Αποτυχία ανάγνωσης PDF: ${err && err.message ? err.message : err}` }
+  }
 })
 
 function studentsByStatus(status) {
