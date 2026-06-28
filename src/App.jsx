@@ -91,7 +91,7 @@ export default function App() {
         <div className="flex items-center gap-2">
           <BookOpen className="text-blue-600" size={22} />
           <div>
-            <h1 className="text-lg font-bold leading-tight text-slate-800">Μαθητολόγιο</h1>
+            <h1 className="text-lg font-bold leading-tight text-slate-800">Μαθητολόγιο ΣΕΠ</h1>
             {info && (
               <p className="text-xs text-slate-400">
                 Σχολικό έτος {info.schoolYearLabel} · έκδοση {info.version}

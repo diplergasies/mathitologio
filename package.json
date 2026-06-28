@@ -40,7 +40,7 @@
   },
   "build": {
     "appId": "gr.altosweb.mathitologio",
-    "productName": "Μαθητολόγιο",
+    "productName": "Μαθητολόγιο ΣΕΠ",
     "directories": {
       "output": "release",
       "buildResources": "build"
@@ -85,7 +85,7 @@
       "allowToChangeInstallationDirectory": true,
       "createDesktopShortcut": true,
       "createStartMenuShortcut": true,
-      "shortcutName": "Μαθητολόγιο"
+      "shortcutName": "Μαθητολόγιο ΣΕΠ"
     }
   }
 }
