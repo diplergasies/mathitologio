@@ -162,14 +162,15 @@ function pdfDecode(t) {
   }
 }
 
-// Text items μιας σελίδας → [{ x, y, w, str }] (κενά αγνοούνται).
+// Text items μιας σελίδας → [{ x, y, str }] (κενά αγνοούνται). ΠΡΟΣΟΧΗ: το πεδίο `w` του
+// pdf2json ΔΕΝ είναι στην ίδια κλίμακα με το `x` (είναι πλάτος σε «text space», πολύ μεγαλύτερο)
+// — γι' αυτό ΔΕΝ χρησιμοποιείται για όρια στηλών· βασιζόμαστε αποκλειστικά στο x.
 function pdfPageItems(page) {
   const texts = (page && page.Texts) || []
   return texts
     .map((t) => ({
       x: Number(t.x) || 0,
       y: Number(t.y) || 0,
-      w: Number(t.w) || 0,
       str: (t.R || []).map((r) => pdfDecode(r.T)).join(''),
     }))
     .filter((it) => it.str && it.str.trim() !== '')
@@ -195,52 +196,48 @@ function pdfIsKnownHeader(str) {
   return Object.values(FIELD_ALIASES).some((aliases) => aliases.includes(n))
 }
 
-// Ένωση γειτονικών items μιας γραμμής σε «κελιά» όταν η οριζόντια απόσταση < gap.
-function pdfMergeCells(items, gap) {
+// Δόμηση κελιών κεφαλίδας: σαρώνουμε αριστερά→δεξιά και ΣΗΜΑΣΙΟΛΟΓΙΚΑ ενώνουμε δύο διαδοχικές
+// λέξεις ΜΟΝΟ όταν ο συνδυασμός τους ταιριάζει με γνωστή πολυλεκτική κεφαλίδα (π.χ. «Ημερομηνία»
+// + «γέννησης» → «Ημερομηνία γέννησης»). Δεν χρησιμοποιούμε αποστάσεις x για ένωση, γιατί το κενό
+// ανάμεσα στις λέξεις μιας κεφαλίδας δεν διακρίνεται γεωμετρικά από το κενό μεταξύ στηλών.
+// Κάθε κελί κρατά το x του πρώτου του item ως «άγκυρα» στήλης.
+function pdfBuildHeaderCells(items) {
+  const sorted = [...items].sort((a, b) => a.x - b.x)
   const cells = []
-  for (const it of [...items].sort((a, b) => a.x - b.x)) {
-    const last = cells[cells.length - 1]
-    if (last && it.x - last.xEnd <= gap) {
-      last.str = (last.str + ' ' + it.str.trim()).replace(/\s+/g, ' ').trim()
-      last.xEnd = Math.max(last.xEnd, it.x + it.w)
-    } else {
-      cells.push({ str: it.str.trim(), x: it.x, xEnd: it.x + it.w })
+  let i = 0
+  while (i < sorted.length) {
+    let take = 1
+    if (i + 1 < sorted.length) {
+      const two = sorted[i].str.trim() + ' ' + sorted[i + 1].str.trim()
+      if (pdfIsKnownHeader(two)) take = 2
     }
+    const str = sorted
+      .slice(i, i + take)
+      .map((s) => s.str.trim())
+      .join(' ')
+      .replace(/\s+/g, ' ')
+      .trim()
+    cells.push({ x: sorted[i].x, str })
+    i += take
   }
   return cells
 }
 
-// Από τα items της γραμμής κεφαλίδων, αυτο-ρύθμιση του gap ώστε να μεγιστοποιούνται οι
-// αναγνωρισμένες κεφαλίδες (πολυλεκτικές π.χ. «Ημ/νία Γέννησης» ενώνονται σωστά).
-function pdfHeaderCells(headerItems) {
-  let best = null
-  for (const gap of [0.2, 0.4, 0.7, 1.0, 1.5, 2.2, 3.0]) {
-    const cells = pdfMergeCells(headerItems, gap)
-    const score = cells.reduce((s, c) => s + (pdfIsKnownHeader(c.str) ? 1 : 0), 0)
-    if (!best || score > best.score) best = { score, cells }
-  }
-  return best ? best.cells : []
-}
-
-// Όρια στηλών (x) από τα κελιά κεφαλίδων: μεσοδιάστημα μεταξύ διαδοχικών κεφαλίδων.
-function pdfColumnBounds(headerCells) {
-  const bounds = []
-  for (let i = 0; i < headerCells.length - 1; i++) {
-    bounds.push((headerCells[i].xEnd + headerCells[i + 1].x) / 2)
-  }
-  return bounds // μήκος = columns-1· η στήλη j καλύπτει [bounds[j-1], bounds[j])
-}
-
-function pdfColumnIndex(x, bounds) {
+// Δείκτης στήλης ενός item: η άγκυρα με το μεγαλύτερο x που είναι ≤ item.x (floor). Έτσι τα
+// πολλαπλά κομμάτια μιας τιμής (π.χ. σύνθετος κωδικός Μονάδας σε 2-3 items) πέφτουν στη σωστή στήλη.
+function pdfColIndex(x, anchors) {
   let j = 0
-  while (j < bounds.length && x >= bounds[j]) j++
+  for (let k = 0; k < anchors.length; k++) {
+    if (x >= anchors[k] - 0.01) j = k
+    else break
+  }
   return j
 }
 
 // Ανακατασκευή 2D πίνακα από όλες τις σελίδες· rows[0] = ετικέτες κεφαλίδων.
 function pdfRowsFromPages(pages) {
   let headerCells = null
-  let bounds = null
+  let anchors = null
   const out = []
 
   for (const page of pages) {
@@ -250,7 +247,7 @@ function pdfRowsFromPages(pages) {
     // Εντοπισμός γραμμής κεφαλίδων σε αυτή τη σελίδα (μέγιστες αναγνωρισμένες κεφαλίδες, ≥2).
     let headerIdx = -1
     let headerScore = 0
-    const perRowCells = lineRows.map((r) => pdfHeaderCells(r.items))
+    const perRowCells = lineRows.map((r) => pdfBuildHeaderCells(r.items))
     perRowCells.forEach((cells, idx) => {
       const score = cells.reduce((s, c) => s + (pdfIsKnownHeader(c.str) ? 1 : 0), 0)
       if (score > headerScore) {
@@ -261,19 +258,19 @@ function pdfRowsFromPages(pages) {
 
     if (headerScore >= 2) {
       headerCells = perRowCells[headerIdx]
-      bounds = pdfColumnBounds(headerCells)
+      anchors = headerCells.map((c) => c.x)
       if (!out.length) out.push(headerCells.map((c) => c.str)) // κεφαλίδα μόνο μία φορά
     }
 
-    if (!headerCells || !bounds) continue // χωρίς κεφαλίδα ακόμη → δεν μπορούμε να χαρτογραφήσουμε
+    if (!headerCells || !anchors) continue // χωρίς κεφαλίδα ακόμη → δεν μπορούμε να χαρτογραφήσουμε
 
     // Γραμμές δεδομένων: όλες πλην της γραμμής κεφαλίδων αυτής της σελίδας.
     lineRows.forEach((r, idx) => {
       if (idx === headerIdx) return
       const cols = new Array(headerCells.length).fill('')
       for (const it of r.items) {
-        const j = pdfColumnIndex(it.x, bounds)
-        cols[j] = (cols[j] ? cols[j] + ' ' : '') + it.str.trim()
+        const j = pdfColIndex(it.x, anchors)
+        cols[j] = cols[j] ? cols[j] + ' ' + it.str.trim() : it.str.trim()
       }
       if (cols.some((c) => c !== '')) out.push(cols.map((c) => c.replace(/\s+/g, ' ').trim()))
     })
