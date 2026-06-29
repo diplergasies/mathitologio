@@ -34,6 +34,7 @@ contextBridge.exposeInMainWorld('api', {
   listTemplates: () => ipcRenderer.invoke('documents:list'),
   addTemplate: () => ipcRenderer.invoke('templates:add'),
   deleteTemplate: (file) => ipcRenderer.invoke('templates:delete', file),
+  openTemplatesFolder: () => ipcRenderer.invoke('templates:openFolder'),
   generateDocument: (id, templateFile, signee) =>
     ipcRenderer.invoke('documents:generate', { id, templateFile, signee }),
 

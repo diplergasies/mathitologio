@@ -842,6 +842,32 @@ ipcMain.handle('templates:delete', (_e, file) => {
   }
 })
 
+// Άνοιγμα του (μόνιμου) φακέλου προτύπων χρήστη στον explorer. Επιβιώνει στις ενημερώσεις.
+// Αντιγράφει τα ενσωματωμένα πρότυπα εκεί (μόνο όσα λείπουν) ώστε να είναι επεξεργάσιμα —
+// δεν αντικαθιστά ποτέ υπάρχον αρχείο χρήστη.
+ipcMain.handle('templates:openFolder', async () => {
+  const dir = userTemplatesDir()
+  try {
+    fs.mkdirSync(dir, { recursive: true })
+    const builtinDir = templatesDir()
+    let seeded = 0
+    if (fs.existsSync(builtinDir)) {
+      for (const f of fs.readdirSync(builtinDir).filter((f) => /\.(pptx|docx)$/i.test(f))) {
+        const dest = path.join(dir, f)
+        if (!fs.existsSync(dest)) {
+          fs.copyFileSync(path.join(builtinDir, f), dest)
+          seeded++
+        }
+      }
+    }
+    const err = await shell.openPath(dir)
+    if (err) return { error: err }
+    return { ok: true, path: dir, seeded }
+  } catch (err) {
+    return { error: err.message }
+  }
+})
+
 ipcMain.handle('documents:generate', async (_e, { id, templateFile, signee }) => {
   const rows = db.query(
     `SELECT s.*, sc.name AS school_name, sc.type AS school_type

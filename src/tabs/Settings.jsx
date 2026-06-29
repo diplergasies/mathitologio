@@ -311,6 +311,16 @@ function TemplatesSection() {
     reload()
   }
 
+  async function openFolder() {
+    setMsg(null)
+    const res = await api.openTemplatesFolder()
+    if (res && res.error) return setMsg({ text: res.error, type: 'error' })
+    if (res && res.seeded) {
+      setMsg({ text: `Αντιγράφηκαν ${res.seeded} ενσωματωμένα πρότυπα στον φάκελο για επεξεργασία.`, type: 'ok' })
+    }
+    reload()
+  }
+
   return (
     <div className="rounded-lg border border-slate-200 bg-white p-4">
       <h3 className="mb-1 flex items-center gap-2 font-semibold text-slate-700">
@@ -319,6 +329,8 @@ function TemplatesSection() {
       <p className="mb-3 text-xs text-slate-400">
         Πρόσθεσε δικά σου πρότυπα <strong>.docx</strong> / <strong>.pptx</strong> με tokens της μορφής{' '}
         {'{{Όνομα}}'} (δες τη Βοήθεια για τη λίστα). Αποθηκεύονται τοπικά και διατηρούνται στις ενημερώσεις.
+        Με το «Άνοιγμα φακέλου προτύπων» μπορείς να <strong>επεξεργαστείς</strong> απευθείας τα αρχεία
+        (τα ενσωματωμένα αντιγράφονται εκεί για επεξεργασία· οι αλλαγές υπερισχύουν).
       </p>
 
       <div className="mb-3 flex flex-wrap items-center gap-3">
@@ -328,6 +340,12 @@ function TemplatesSection() {
           className="inline-flex items-center gap-1.5 rounded-md bg-blue-600 px-3 py-2 text-sm font-medium text-white hover:bg-blue-700 disabled:opacity-40"
         >
           <FilePlus2 size={16} /> {busy ? 'Γίνεται…' : 'Προσθήκη προτύπου'}
+        </button>
+        <button
+          onClick={openFolder}
+          className="inline-flex items-center gap-1.5 rounded-md border border-slate-300 px-3 py-2 text-sm text-slate-600 hover:bg-slate-50"
+        >
+          <FolderOpen size={16} /> Άνοιγμα φακέλου προτύπων
         </button>
         {msg && (
           <span className={`text-sm ${msg.type === 'error' ? 'text-red-600' : 'text-green-600'}`}>
