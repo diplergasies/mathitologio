@@ -6,6 +6,8 @@ const { contextBridge, ipcRenderer } = require('electron')
 contextBridge.exposeInMainWorld('api', {
   importXlsx: () => ipcRenderer.invoke('import:xlsx'),
   importPdf: () => ipcRenderer.invoke('import:pdf'),
+  addManualStudent: (fields) => ipcRenderer.invoke('students:addManual', fields),
+  resetAllData: () => ipcRenderer.invoke('data:reset'),
 
   listStudents: (status) => ipcRenderer.invoke('students:list', status),
   enrollOptions: (id) => ipcRenderer.invoke('students:enrollOptions', id),

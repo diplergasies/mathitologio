@@ -3,9 +3,10 @@ import api from '../api'
 import StudentTable from '../components/StudentTable'
 import BulkEnrollModal from '../components/BulkEnrollModal'
 import BulkDeleteByDikaModal from '../components/BulkDeleteByDikaModal'
+import ManualArrivalModal from '../components/ManualArrivalModal'
 import { useSelection } from '../useSelection'
 import { birthSortValue, proposedSortValue } from '../sort'
-import { GraduationCap, Trash2, Users, Hash } from 'lucide-react'
+import { GraduationCap, Trash2, Users, Hash, UserPlus } from 'lucide-react'
 
 const columns = [
   { key: 'eponymo', label: 'Επώνυμο' },
@@ -32,6 +33,7 @@ export default function Arrivals({ version, bump }) {
   const [students, setStudents] = useState([])
   const [bulkEnroll, setBulkEnroll] = useState(false)
   const [dikaDelete, setDikaDelete] = useState(false)
+  const [manual, setManual] = useState(false)
   const sel = useSelection()
 
   function load() {
@@ -61,12 +63,20 @@ export default function Arrivals({ version, bump }) {
     <div>
       <div className="mb-3 flex items-center justify-between gap-3">
         <span className="text-sm text-slate-500">{students.length} αφίξεις προς εγγραφή</span>
-        <button
-          onClick={() => setDikaDelete(true)}
-          className="inline-flex items-center gap-1.5 rounded-md border border-red-300 px-3 py-1.5 text-sm font-medium text-red-600 hover:bg-red-50"
-        >
-          <Hash size={15} /> Μαζική διαγραφή με ΔΙΚΑ
-        </button>
+        <div className="flex items-center gap-2">
+          <button
+            onClick={() => setManual(true)}
+            className="inline-flex items-center gap-1.5 rounded-md bg-blue-600 px-3 py-1.5 text-sm font-medium text-white hover:bg-blue-700"
+          >
+            <UserPlus size={15} /> Χειροκίνητη καταχώρηση
+          </button>
+          <button
+            onClick={() => setDikaDelete(true)}
+            className="inline-flex items-center gap-1.5 rounded-md border border-red-300 px-3 py-1.5 text-sm font-medium text-red-600 hover:bg-red-50"
+          >
+            <Hash size={15} /> Μαζική διαγραφή με ΔΙΚΑ
+          </button>
+        </div>
       </div>
 
       {sel.ids.length > 0 && (
@@ -139,6 +149,13 @@ export default function Arrivals({ version, bump }) {
             sel.clear()
             bump()
           }}
+        />
+      )}
+
+      {manual && (
+        <ManualArrivalModal
+          onClose={() => setManual(false)}
+          onAdded={() => bump()}
         />
       )}
     </div>

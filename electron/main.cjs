@@ -283,6 +283,101 @@ ipcMain.handle('import:pdf', async () => {
   }
 })
 
+// Κοινό batch για όλες τις χειροκίνητες καταχωρήσεις ενός σχολικού έτους (ένα χρώμα/πηγή).
+function getOrCreateManualBatch(syLabel) {
+  const MANUAL = 'Χειροκίνητη καταχώρηση'
+  const rows = db.query(
+    'SELECT id FROM batches WHERE source_filename=$f AND school_year=$y ORDER BY id DESC LIMIT 1',
+    { $f: MANUAL, $y: syLabel }
+  )
+  if (rows.length) return rows[0].id
+  const cnt = db.query('SELECT COUNT(*) AS c FROM batches')[0].c
+  const colorIndex = cnt % BATCH_COLOR_COUNT
+  return db.run(
+    `INSERT INTO batches (imported_at, source_filename, school_year, color_index)
+     VALUES ($a, $f, $y, $c)`,
+    { $a: nowIso(), $f: MANUAL, $y: syLabel, $c: colorIndex }
+  )
+}
+
+// Χειροκίνητη καταχώρηση μαθητή στις Αφίξεις. Ίδιοι κανόνες με την εισαγωγή
+// (σχολική ηλικία, έλεγχος διπλού ΔΙΚΑ σε ενεργούς).
+ipcMain.handle('students:addManual', (_e, f = {}) => {
+  const eponymo = String(f.eponymo || '').trim()
+  const onoma = String(f.onoma || '').trim()
+  const dika = String(f.dika || '').trim()
+  if (!eponymo && !onoma && !dika) {
+    return { error: 'Συμπλήρωσε τουλάχιστον Επώνυμο, Όνομα ή ΔΙΚΑ.' }
+  }
+
+  const birth = importer.parseBirthDate(String(f.imerominia_gennisis || '').trim())
+  if (!birth.year) {
+    return { error: 'Συμπλήρωσε έγκυρη ημερομηνία γέννησης.' }
+  }
+
+  const syStart = getSchoolYearStart()
+  const cls = grades.classify(birth.year, syStart)
+  if (!cls) {
+    return {
+      error: `Εκτός σχολικής ηλικίας για το σχολικό έτος ${grades.schoolYearLabel(syStart)} (έτος γέννησης ${birth.year}).`,
+    }
+  }
+
+  if (dika) {
+    const dup = db.query(
+      "SELECT 1 FROM students WHERE dika=$d AND status IN ('arrival','enrolled') LIMIT 1",
+      { $d: dika }
+    )
+    if (dup.length) return { error: `Υπάρχει ήδη ενεργός μαθητής με ΔΙΚΑ ${dika}.` }
+  }
+
+  const syLabel = grades.schoolYearLabel(syStart)
+  const batchId = getOrCreateManualBatch(syLabel)
+  const afixis = f.imerominia_afixis
+    ? importer.parseBirthDate(String(f.imerominia_afixis).trim()).display || todayDisplay()
+    : todayDisplay()
+  const now = nowIso()
+
+  const id = db.run(
+    `INSERT INTO students
+      (batch_id, monada, dika, onoma, eponymo, patronymo, mitronymo, fylo, glossa,
+       ithageneia, imerominia_gennisis, birth_year, imerominia_afixis, epitropos,
+       computed_type, computed_grade, status, created_at, updated_at)
+     VALUES
+      ($batch, $monada, $dika, $onoma, $eponymo, $patronymo, $mitronymo, $fylo, $glossa,
+       $ithageneia, $imgen, $byear, $afixis, $epitropos,
+       $ctype, $cgrade, 'arrival', $now, $now)`,
+    {
+      $batch: batchId,
+      $monada: String(f.monada || '').trim(),
+      $dika: dika,
+      $onoma: onoma,
+      $eponymo: eponymo,
+      $patronymo: String(f.patronymo || '').trim(),
+      $mitronymo: String(f.mitronymo || '').trim(),
+      $fylo: String(f.fylo || '').trim(),
+      $glossa: String(f.glossa || '').trim(),
+      $ithageneia: String(f.ithageneia || '').trim(),
+      $imgen: birth.display,
+      $byear: birth.year,
+      $afixis: afixis,
+      $epitropos: f.epitropos === 'Ναι' ? 'Ναι' : 'Όχι',
+      $ctype: cls.category,
+      $cgrade: cls.grade,
+      $now: now,
+    }
+  )
+  return { ok: true, id, computed: `${cls.category} · ${cls.grade}` }
+})
+
+// ΟΛΙΚΟ reset: διαγραφή όλων των μαθητών & batches (Αφίξεις/Μαθητές/Διαγραφές και
+// συνεπώς Παρατηρητήριο/Αποτύπωση). ΔΕΝ θίγει σχολεία, ρυθμίσεις, πρότυπα.
+ipcMain.handle('data:reset', () => {
+  db.run('DELETE FROM students')
+  db.run('DELETE FROM batches')
+  return { ok: true }
+})
+
 function studentsByStatus(status) {
   return db.query(
     `SELECT s.*, b.color_index AS batch_color, b.school_year AS batch_year,

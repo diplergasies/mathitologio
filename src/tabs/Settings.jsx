@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react'
 import api from '../api'
 import Schools from './Schools'
 import PromotionModal from '../components/PromotionModal'
+import ResetDataModal from '../components/ResetDataModal'
 import { UserCog, Save, School, CalendarRange, GraduationCap, DatabaseBackup, FolderOpen, Play, FileText, FilePlus2, Trash2, AlertTriangle } from 'lucide-react'
 
 // Ζωντανός υπολογισμός εύρους ετών ανά τύπο, από το έτος προνηπίου P.
@@ -412,6 +413,45 @@ function TemplatesSection() {
   )
 }
 
+function ResetSection({ bump }) {
+  const [show, setShow] = useState(false)
+  const [done, setDone] = useState(false)
+
+  return (
+    <div className="rounded-lg border border-red-200 bg-red-50/40 p-4">
+      <h3 className="mb-1 flex items-center gap-2 font-semibold text-red-700">
+        <AlertTriangle size={18} /> Επικίνδυνη ζώνη — Reset δεδομένων
+      </h3>
+      <p className="mb-3 text-xs text-slate-500">
+        Διαγράφει <strong>όλους τους μαθητές</strong> από Αφίξεις, Μαθητές και Διαγραφές (και
+        συνεπώς Παρατηρητήριο & Αποτύπωση). Διατηρεί σχολεία, ρυθμίσεις και πρότυπα. Μη αναστρέψιμο.
+      </p>
+      <div className="flex flex-wrap items-center gap-3">
+        <button
+          onClick={() => {
+            setDone(false)
+            setShow(true)
+          }}
+          className="inline-flex items-center gap-1.5 rounded-md bg-red-600 px-3 py-2 text-sm font-medium text-white hover:bg-red-700"
+        >
+          <Trash2 size={16} /> Reset όλων των δεδομένων
+        </button>
+        {done && <span className="text-sm text-green-600">Όλα τα δεδομένα διαγράφηκαν ✓</span>}
+      </div>
+
+      {show && (
+        <ResetDataModal
+          onClose={() => setShow(false)}
+          onDone={() => {
+            setDone(true)
+            bump && bump()
+          }}
+        />
+      )}
+    </div>
+  )
+}
+
 export default function Settings({ version, bump }) {
   const [form, setForm] = useState({ sep: '', nomos: '', domi: '', perif: '' })
   const [saved, setSaved] = useState(false)
@@ -492,6 +532,8 @@ export default function Settings({ version, bump }) {
         </h3>
         <Schools version={version} bump={bump} />
       </div>
+
+      <ResetSection bump={bump} />
     </div>
   )
 }

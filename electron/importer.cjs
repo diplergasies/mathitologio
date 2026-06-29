@@ -56,12 +56,12 @@ function parseBirthDate(value) {
   if (value == null || value === '') return { display: '', year: null }
 
   if (value instanceof Date && !isNaN(value)) {
-    // Χρήση UTC components: ντετερμινιστικό αποτέλεσμα ανεξαρτήτως ζώνης ώρας του μηχανήματος
-    // (οι ημερομηνίες αποθηκεύονται ως ISO με ώρα ~τέλος ημέρας τοπικά — το UTC κρατά τη σωστή ημέρα).
+    // Fallback για τιμές Date (το XLSX πλέον διαβάζεται χωρίς cellDates → serial αριθμοί).
+    // Χρήση ΤΟΠΙΚΩΝ components ώστε να μην «πέφτει» η ημέρα σε ζώνες UTC+.
     const d = value
     return {
-      display: `${String(d.getUTCDate()).padStart(2, '0')}/${String(d.getUTCMonth() + 1).padStart(2, '0')}/${d.getUTCFullYear()}`,
-      year: d.getUTCFullYear(),
+      display: `${String(d.getDate()).padStart(2, '0')}/${String(d.getMonth() + 1).padStart(2, '0')}/${d.getFullYear()}`,
+      year: d.getFullYear(),
     }
   }
 
@@ -138,8 +138,12 @@ function recordsFromRows(rows) {
 }
 
 // Διαβάζει αρχείο XLSX/XLS και επιστρέφει το ίδιο σχήμα με το recordsFromRows.
+// ΣΗΜΑΝΤΙΚΟ: ΧΩΡΙΣ `cellDates` — οι ημερομηνίες έρχονται ως serial αριθμοί και
+// αποκωδικοποιούνται με XLSX.SSF.parse_date_code (στο parseBirthDate). Αποφεύγει το bug
+// ζώνης ώρας του SheetJS, που με cellDates:true έφτιαχνε Date ~1′ πριν τα μεσάνυχτα →
+// λάθος ημέρα/έτος (π.χ. 23/01/2010→22/01, 01/01/2008→31/12/2007).
 function parseFile(filePath) {
-  const wb = XLSX.readFile(filePath, { cellDates: true })
+  const wb = XLSX.readFile(filePath)
   const sheet = wb.Sheets[wb.SheetNames[0]]
   const rows = XLSX.utils.sheet_to_json(sheet, { header: 1, raw: true, defval: '' })
   return recordsFromRows(rows)
