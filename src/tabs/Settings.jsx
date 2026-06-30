@@ -5,20 +5,40 @@ import PromotionModal from '../components/PromotionModal'
 import ResetDataModal from '../components/ResetDataModal'
 import { UserCog, Save, School, CalendarRange, GraduationCap, DatabaseBackup, FolderOpen, Play, FileText, FilePlus2, Trash2, AlertTriangle } from 'lucide-react'
 
-// Ζωντανός υπολογισμός εύρους ετών ανά τύπο, από το έτος προνηπίου P.
-function tableFor(P) {
-  const r = (a, b) => ({ from: Math.min(a, b), to: Math.max(a, b) })
-  return [
-    { type: 'Νηπιαγωγείο', ...r(P - 1, P), years: 2 },
-    { type: 'Δημοτικό', ...r(P - 7, P - 2), years: 6 },
-    { type: 'Γυμνάσιο', ...r(P - 10, P - 8), years: 3 },
-    { type: 'Λύκειο / ΕΠΑΛ', ...r(P - 13, P - 11), years: 3 },
-  ]
+// Βαθμίδες με σταθερό κλειδί `type` (ίδιο με το backend) και ετικέτα εμφάνισης.
+const BAND_DEFS = [
+  { type: 'Νηπιαγωγείο', label: 'Νηπιαγωγείο' },
+  { type: 'Δημοτικό', label: 'Δημοτικό' },
+  { type: 'Γυμνάσιο', label: 'Γυμνάσιο' },
+  { type: 'Λύκειο/ΕΠΑΛ', label: 'Λύκειο / ΕΠΑΛ' },
+]
+
+// Default εύρη ετών γέννησης ανά βαθμίδα, από το έτος προνηπίου P (= έτος έναρξης − 4).
+function defaultRowsFor(P) {
+  P = Number(P)
+  const spans = {
+    'Νηπιαγωγείο': [P - 1, P],
+    'Δημοτικό': [P - 7, P - 2],
+    'Γυμνάσιο': [P - 10, P - 8],
+    'Λύκειο/ΕΠΑΛ': [P - 13, P - 11],
+  }
+  return BAND_DEFS.map((b) => ({ ...b, from: spans[b.type][0], to: spans[b.type][1] }))
+}
+
+// Συγχώνευση των αποθηκευμένων ευρών (από το backend) με τις ετικέτες εμφάνισης.
+function rowsFromRanges(ranges, P) {
+  const defs = defaultRowsFor(P)
+  if (!Array.isArray(ranges)) return defs
+  return defs.map((d) => {
+    const r = ranges.find((x) => x.type === d.type)
+    return r ? { ...d, from: r.fromYear, to: r.toYear } : d
+  })
 }
 
 function SchoolYearSection({ bump }) {
   const [nip, setNip] = useState(null) // έτος προνηπίου (Νηπιαγωγείο, μικρότερη ηλικία)
   const [label, setLabel] = useState('')
+  const [rows, setRows] = useState([]) // [{ type, label, from, to }]
   const [saved, setSaved] = useState(false)
   const [showPromote, setShowPromote] = useState(false)
 
@@ -27,16 +47,32 @@ function SchoolYearSection({ bump }) {
       if (d) {
         setNip(d.nipYear)
         setLabel(d.schoolYearLabel)
+        setRows(rowsFromRanges(d.ranges, d.nipYear))
       }
     })
   }
 
   useEffect(reload, [])
 
+  // Αλλαγή Προνηπίου → επαναϋπολογισμός όλων των βαθμίδων.
+  function onNipChange(v) {
+    setNip(v)
+    setSaved(false)
+    const n = Number(v)
+    if (v !== '' && Number.isFinite(n)) setRows(defaultRowsFor(n))
+  }
+
+  function setCell(idx, key, val) {
+    setRows((rs) => rs.map((r, i) => (i === idx ? { ...r, [key]: val } : r)))
+    setSaved(false)
+  }
+
   async function save() {
-    const res = await api.setSchoolYear(Number(nip))
+    const ranges = rows.map((r) => ({ type: r.type, fromYear: Number(r.from), toYear: Number(r.to) }))
+    const res = await api.setSchoolYear({ nipYear: Number(nip), ranges })
     if (res && res.ok) {
       setLabel(`${res.schoolYearStart}-${res.schoolYearStart + 1}`)
+      if (Array.isArray(res.ranges)) setRows(rowsFromRanges(res.ranges, nip))
       setSaved(true)
       setTimeout(() => setSaved(false), 3000)
       bump && bump()
@@ -44,7 +80,9 @@ function SchoolYearSection({ bump }) {
   }
 
   if (nip == null) return null
-  const rows = tableFor(Number(nip))
+
+  const yearInput =
+    'w-20 rounded-md border border-slate-300 px-2 py-1.5 text-sm text-center'
 
   return (
     <div className="rounded-lg border border-slate-200 bg-white p-4">
@@ -52,8 +90,9 @@ function SchoolYearSection({ bump }) {
         <CalendarRange size={18} /> Έτη γέννησης ανά τύπο σχολείου
       </h3>
       <p className="mb-3 text-xs text-slate-400">
-        Συμπλήρωσε το έτος γέννησης του <strong>Προνηπίου</strong> (μικρότερη ηλικία Νηπιαγωγείου).
-        Οι υπόλοιπες βαθμίδες υπολογίζονται αυτόματα (Νηπ. 2, Δημ. 6, Γυμν. 3, Λύκ./ΕΠΑΛ 3 έτη).
+        Συμπλήρωσε το έτος γέννησης του <strong>Προνηπίου</strong> (μικρότερη ηλικία Νηπιαγωγείου)·
+        οι υπόλοιπες βαθμίδες συμπληρώνονται αυτόματα. Μπορείς να <strong>επεξεργαστείς</strong> τις
+        χρονολογίες κάθε βαθμίδας — η διαλογή του μαθητικού πληθυσμού γίνεται βάσει αυτών.
         Σχολικό έτος: <strong>{label}</strong>.
       </p>
 
@@ -63,7 +102,7 @@ function SchoolYearSection({ bump }) {
           <input
             type="number"
             value={nip}
-            onChange={(e) => setNip(e.target.value)}
+            onChange={(e) => onNipChange(e.target.value)}
             className="w-32 rounded-md border border-slate-300 px-3 py-2 text-sm"
           />
         </div>
@@ -86,15 +125,34 @@ function SchoolYearSection({ bump }) {
             </tr>
           </thead>
           <tbody>
-            {rows.map((row) => (
-              <tr key={row.type} className="border-t border-slate-100">
-                <td className="px-3 py-2 font-medium text-slate-700">{row.type}</td>
-                <td className="px-3 py-2 text-slate-700">
-                  {row.from} – {row.to}
-                </td>
-                <td className="px-3 py-2 text-slate-500">{row.years} έτη</td>
-              </tr>
-            ))}
+            {rows.map((row, idx) => {
+              const span = Number(row.to) - Number(row.from) + 1
+              return (
+                <tr key={row.type} className="border-t border-slate-100">
+                  <td className="px-3 py-2 font-medium text-slate-700">{row.label}</td>
+                  <td className="px-3 py-2">
+                    <div className="flex items-center gap-2">
+                      <input
+                        type="number"
+                        value={row.from}
+                        onChange={(e) => setCell(idx, 'from', e.target.value)}
+                        className={yearInput}
+                      />
+                      <span className="text-slate-400">–</span>
+                      <input
+                        type="number"
+                        value={row.to}
+                        onChange={(e) => setCell(idx, 'to', e.target.value)}
+                        className={yearInput}
+                      />
+                    </div>
+                  </td>
+                  <td className="px-3 py-2 text-slate-500">
+                    {Number.isFinite(span) && span > 0 ? `${span} έτη` : '—'}
+                  </td>
+                </tr>
+              )
+            })}
           </tbody>
         </table>
       </div>

@@ -31,29 +31,50 @@ function gradesForType(type) {
   }
 }
 
-// Επιστρέφει { category, grade, eligibleTypes } ή null αν εκτός σχολικής ηλικίας.
-// category = ο "λογικός" τύπος βαθμίδας· eligibleTypes = τύποι σχολείων όπου μπορεί να εγγραφεί.
-function classify(birthYear, schoolYearStart) {
-  const Y = Number(schoolYearStart)
-  const age = Y - Number(birthYear)
+// Μεταδεδομένα ανά βαθμίδα (με τη σειρά προτεραιότητας διαλογής Νηπ→Δημ→Γυμ→Λύκ).
+// type = το όνομα που εμφανίζεται/αποθηκεύεται (ίδιο με TYPE_AGES)· category = ο "λογικός" τύπος·
+// grades = λίστα τάξεων από τη μικρότερη ηλικία προς τη μεγαλύτερη· eligibleTypes = τύποι σχολείων.
+const BANDS = [
+  { type: 'Νηπιαγωγείο', category: 'Νηπιαγωγείο', grades: ['Προνήπιο', 'Νήπιο'], eligibleTypes: ['Νηπιαγωγείο'] },
+  { type: 'Δημοτικό', category: 'Δημοτικό', grades: DIMOTIKO_GRADES, eligibleTypes: ['Δημοτικό'] },
+  { type: 'Γυμνάσιο', category: 'Γυμνάσιο', grades: TRIETIA_GRADES, eligibleTypes: ['Γυμνάσιο'] },
+  { type: 'Λύκειο/ΕΠΑΛ', category: 'Λύκειο', grades: TRIETIA_GRADES, eligibleTypes: ['Λύκειο', 'ΕΠΑΛ'] },
+]
 
-  if (age === 4) return { category: 'Νηπιαγωγείο', grade: 'Προνήπιο', eligibleTypes: ['Νηπιαγωγείο'] }
-  if (age === 5) return { category: 'Νηπιαγωγείο', grade: 'Νήπιο', eligibleTypes: ['Νηπιαγωγείο'] }
-  if (age >= 6 && age <= 11) {
-    return { category: 'Δημοτικό', grade: DIMOTIKO_GRADES[age - 6], eligibleTypes: ['Δημοτικό'] }
-  }
-  if (age >= 12 && age <= 14) {
-    return { category: 'Γυμνάσιο', grade: TRIETIA_GRADES[age - 12], eligibleTypes: ['Γυμνάσιο'] }
-  }
-  if (age >= 15 && age <= 17) {
-    // Ηλικίες Λυκείου: επιτρέπεται Λύκειο (ΓΕΛ) ή ΕΠΑΛ.
-    return { category: 'Λύκειο', grade: TRIETIA_GRADES[age - 15], eligibleTypes: ['Λύκειο', 'ΕΠΑΛ'] }
+// Default εύρη ετών γέννησης ανά βαθμίδα, για έτος έναρξης σχ. έτους S (από το gradeTable).
+function defaultRanges(S) {
+  return gradeTable(S).map((t) => ({ type: t.type, fromYear: t.fromYear, toYear: t.toYear }))
+}
+
+// Επιστρέφει { category, grade, eligibleTypes } ή null αν εκτός σχολικής ηλικίας.
+// ranges (προαιρετικό): πίνακας { type, fromYear, toYear } που ορίζει χειροκίνητα τα εύρη.
+// Αν λείπει, χρησιμοποιούνται τα default εύρη που παράγονται από το schoolYearStart.
+function classify(birthYear, schoolYearStart, ranges) {
+  const by = Number(birthYear)
+  if (!Number.isFinite(by)) return null
+
+  const rng = Array.isArray(ranges) && ranges.length ? ranges : defaultRanges(schoolYearStart)
+
+  // Σταθερή προτεραιότητα βαθμίδων· πρώτη βαθμίδα όπου fromYear ≤ έτος γέννησης ≤ toYear.
+  for (const band of BANDS) {
+    const r = rng.find((x) => x.type === band.type)
+    if (!r) continue
+    const from = Number(r.fromYear)
+    const to = Number(r.toYear)
+    if (!Number.isFinite(from) || !Number.isFinite(to)) continue
+    if (by >= from && by <= to) {
+      // idx = toYear − birthYear: 0 = μικρότερη ηλικία = πρώτη τάξη· clamp στα όρια της λίστας.
+      let idx = to - by
+      if (idx < 0) idx = 0
+      if (idx > band.grades.length - 1) idx = band.grades.length - 1
+      return { category: band.category, grade: band.grades[idx], eligibleTypes: band.eligibleTypes.slice() }
+    }
   }
   return null
 }
 
-function isSchoolAge(birthYear, schoolYearStart) {
-  return classify(birthYear, schoolYearStart) !== null
+function isSchoolAge(birthYear, schoolYearStart, ranges) {
+  return classify(birthYear, schoolYearStart, ranges) !== null
 }
 
 // Προβιβασμός: από (τύπος, τάξη) -> επόμενο βήμα.
@@ -135,6 +156,7 @@ module.exports = {
   currentSchoolYearStart,
   schoolYearLabel,
   gradeTable,
+  defaultRanges,
   nipiagogeioYear,
   schoolYearStartFromNip,
 }

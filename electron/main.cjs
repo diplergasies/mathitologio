@@ -55,6 +55,19 @@ function getSchoolYearStart() {
   return v ? Number(v) : grades.currentSchoolYearStart()
 }
 
+// Χειροκίνητα εύρη ετών γέννησης ανά βαθμίδα (αν έχουν οριστεί στις Ρυθμίσεις).
+// Επιστρέφει πίνακα [{ type, fromYear, toYear }] ή null (→ classify πέφτει σε defaults).
+function getGradeRanges() {
+  const v = db.getAllSettings().gradeRanges
+  if (!v) return null
+  try {
+    const parsed = JSON.parse(v)
+    return Array.isArray(parsed) && parsed.length ? parsed : null
+  } catch {
+    return null
+  }
+}
+
 // Δημιουργεί το dictionary tokens για ένα μαθητή (κοινό σε ατομική & μαζική έκδοση).
 function buildDocData(s, cfg) {
   return {
@@ -163,14 +176,32 @@ ipcMain.handle('schoolYear:get', () => {
     schoolYearLabel: grades.schoolYearLabel(S),
     nipYear: grades.nipiagogeioYear(S),
     table: grades.gradeTable(S),
+    ranges: getGradeRanges() || grades.defaultRanges(S),
   }
 })
 
-ipcMain.handle('schoolYear:set', (_e, nipYear) => {
+// Κανονικοποίηση χειροκίνητων ευρών: ακέραιοι, fromYear ≤ toYear, μόνο γνωστές βαθμίδες.
+function normalizeRanges(ranges, S) {
+  const defaults = grades.defaultRanges(S)
+  return defaults.map((d) => {
+    const r = Array.isArray(ranges) ? ranges.find((x) => x && x.type === d.type) : null
+    let from = r != null ? Math.trunc(Number(r.fromYear)) : NaN
+    let to = r != null ? Math.trunc(Number(r.toYear)) : NaN
+    if (!Number.isFinite(from)) from = d.fromYear
+    if (!Number.isFinite(to)) to = d.toYear
+    if (from > to) [from, to] = [to, from]
+    return { type: d.type, fromYear: from, toYear: to }
+  })
+}
+
+ipcMain.handle('schoolYear:set', (_e, payload) => {
+  // Οπισθοσυμβατότητα: αποδοχή είτε σκέτου number (παλιό) είτε { nipYear, ranges }.
+  const nipYear = payload && typeof payload === 'object' ? payload.nipYear : payload
   const S = grades.schoolYearStartFromNip(nipYear)
   if (!Number.isFinite(S) || S < 2000 || S > 2100) return { error: 'Μη έγκυρο έτος' }
-  db.setSettings({ schoolYearStart: String(S) })
-  return { ok: true, schoolYearStart: S, table: grades.gradeTable(S) }
+  const ranges = normalizeRanges(payload && typeof payload === 'object' ? payload.ranges : null, S)
+  db.setSettings({ schoolYearStart: String(S), gradeRanges: JSON.stringify(ranges) })
+  return { ok: true, schoolYearStart: S, table: grades.gradeTable(S), ranges }
 })
 
 // Κοινή λογική εισαγωγής (XLSX ή PDF): δημιουργία batch, έλεγχος διπλών ΔΙΚΑ, εισαγωγή.
@@ -179,6 +210,7 @@ function insertRecords(filePath, parsed) {
   const { records, missingFields, totalRows } = parsed
 
   const syStart = getSchoolYearStart()
+  const ranges = getGradeRanges()
   const syLabel = grades.schoolYearLabel(syStart)
 
   // Πλήθος υπαρχόντων batch -> color_index (κυκλικά).
@@ -218,7 +250,7 @@ function insertRecords(filePath, parsed) {
       duplicates++
       continue
     }
-    const cls = r.birth_year != null ? grades.classify(r.birth_year, syStart) : null
+    const cls = r.birth_year != null ? grades.classify(r.birth_year, syStart, ranges) : null
     if (!cls) {
       excluded++
       continue
@@ -316,7 +348,7 @@ ipcMain.handle('students:addManual', (_e, f = {}) => {
   }
 
   const syStart = getSchoolYearStart()
-  const cls = grades.classify(birth.year, syStart)
+  const cls = grades.classify(birth.year, syStart, getGradeRanges())
   if (!cls) {
     return {
       error: `Εκτός σχολικής ηλικίας για το σχολικό έτος ${grades.schoolYearLabel(syStart)} (έτος γέννησης ${birth.year}).`,
@@ -398,7 +430,7 @@ ipcMain.handle('students:enrollOptions', (_e, id) => {
   const rows = db.query('SELECT * FROM students WHERE id = $id', { $id: id })
   if (!rows.length) return { error: 'Δεν βρέθηκε ο μαθητής' }
   const s = rows[0]
-  const cls = grades.classify(s.birth_year, getSchoolYearStart())
+  const cls = grades.classify(s.birth_year, getSchoolYearStart(), getGradeRanges())
   if (!cls) return { error: 'Ο μαθητής είναι εκτός σχολικής ηλικίας' }
 
   const placeholders = cls.eligibleTypes.map((_t, i) => `$t${i}`).join(',')
@@ -415,7 +447,7 @@ ipcMain.handle('students:enroll', (_e, { id, schoolId }) => {
   const rows = db.query('SELECT * FROM students WHERE id = $id', { $id: id })
   if (!rows.length) return { error: 'Δεν βρέθηκε ο μαθητής' }
   const s = rows[0]
-  const cls = grades.classify(s.birth_year, getSchoolYearStart())
+  const cls = grades.classify(s.birth_year, getSchoolYearStart(), getGradeRanges())
   const grade = cls ? cls.grade : s.computed_grade
 
   // Αν δεν δόθηκε σχολείο, auto-ανάθεση ΜΟΝΟ αν υπάρχει ακριβώς ένα κατάλληλο· αλλιώς κενό
@@ -536,6 +568,7 @@ ipcMain.handle('students:bulkPurge', (_e, ids = []) => {
 // mode: 'auto' (μοναδικό σχολείο του τύπου) ή 'school' (συγκεκριμένο schoolId).
 ipcMain.handle('students:bulkEnroll', (_e, { ids = [], mode, schoolId }) => {
   const syStart = getSchoolYearStart()
+  const ranges = getGradeRanges()
   const allSchools = db.query('SELECT * FROM schools')
   let enrolled = 0 // εγγράφηκαν με σχολείο
   let needSchool = 0 // εγγράφηκαν αλλά χωρίς σχολείο (επιλογή αργότερα)
@@ -544,7 +577,7 @@ ipcMain.handle('students:bulkEnroll', (_e, { ids = [], mode, schoolId }) => {
     const rows = db.query('SELECT * FROM students WHERE id=$id', { $id: id })
     if (!rows.length) continue
     const s = rows[0]
-    const cls = grades.classify(s.birth_year, syStart)
+    const cls = grades.classify(s.birth_year, syStart, ranges)
     if (!cls) {
       skipped.push(`${s.eponymo} ${s.onoma} — εκτός σχολικής ηλικίας`)
       continue
@@ -656,6 +689,17 @@ ipcMain.handle('promotion:apply', (_e, promotedIds = []) => {
   // Προχώρα το σχολικό έτος κατά 1.
   const yearStart = getSchoolYearStart() + 1
   db.setSettings({ schoolYearStart: String(yearStart) })
+
+  // Αν υπάρχουν χειροκίνητα εύρη, μετατόπισέ τα κατά +1 ώστε να μείνουν συνεπή με το νέο έτος.
+  const storedRanges = getGradeRanges()
+  if (storedRanges) {
+    const shifted = storedRanges.map((r) => ({
+      type: r.type,
+      fromYear: Number(r.fromYear) + 1,
+      toYear: Number(r.toYear) + 1,
+    }))
+    db.setSettings({ gradeRanges: JSON.stringify(shifted) })
+  }
 
   return { ok: true, promoted, graduated, needSchool, yearStart, yearLabel: grades.schoolYearLabel(yearStart) }
 })

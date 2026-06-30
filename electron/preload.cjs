@@ -29,7 +29,7 @@ contextBridge.exposeInMainWorld('api', {
   setSettings: (obj) => ipcRenderer.invoke('settings:set', obj),
 
   getSchoolYear: () => ipcRenderer.invoke('schoolYear:get'),
-  setSchoolYear: (nipYear) => ipcRenderer.invoke('schoolYear:set', nipYear),
+  setSchoolYear: (payload) => ipcRenderer.invoke('schoolYear:set', payload),
 
   listTemplates: () => ipcRenderer.invoke('documents:list'),
   addTemplate: () => ipcRenderer.invoke('templates:add'),
