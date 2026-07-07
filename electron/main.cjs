@@ -499,29 +499,48 @@ ipcMain.handle('students:restore', (_e, id) => {
   return { ok: true, status: prev }
 })
 
+// Στήλες κειμένου που επιτρέπεται να επεξεργαστούν inline από τις καρτέλες. Whitelist
+// ονομάτων στηλών (όχι από το key του client) ώστε να μη γίνεται SQL injection.
+const EDITABLE_TEXT_COLS = [
+  'monada', 'dika', 'onoma', 'eponymo', 'patronymo', 'mitronymo',
+  'fylo', 'glossa', 'ithageneia', 'imerominia_afixis',
+  'epitropos', 'asynodeftos', 'eidiki_agogi', 'current_grade',
+]
+
 ipcMain.handle('students:update', (_e, { id, fields }) => {
   const sets = []
   const params = { $id: id, $now: nowIso() }
-  if (fields.current_grade !== undefined) {
-    sets.push('current_grade=$g')
-    params.$g = fields.current_grade
+
+  for (const col of EDITABLE_TEXT_COLS) {
+    if (fields[col] !== undefined) {
+      const p = '$' + col
+      sets.push(`${col}=${p}`)
+      params[p] = fields[col] == null ? '' : String(fields[col])
+    }
   }
-  if (fields.epitropos !== undefined) {
-    sets.push('epitropos=$ep')
-    params.$ep = fields.epitropos
-  }
-  if (fields.asynodeftos !== undefined) {
-    sets.push('asynodeftos=$as')
-    params.$as = fields.asynodeftos
-  }
-  if (fields.eidiki_agogi !== undefined) {
-    sets.push('eidiki_agogi=$ea')
-    params.$ea = fields.eidiki_agogi
-  }
+
   if (fields.deletion_reason !== undefined) {
     sets.push('deletion_reason=$dr')
     params.$dr = fields.deletion_reason || null
   }
+
+  // Ημερομηνία γέννησης: ανάλυση → ενημέρωση εμφανιζόμενης τιμής + έτους, και επανακατάταξη
+  // (ενημερώνει την «Προτεινόμενη τάξη») όταν η νέα ημερομηνία δίνει σχολική ηλικία.
+  if (fields.imerominia_gennisis !== undefined) {
+    const birth = importer.parseBirthDate(String(fields.imerominia_gennisis || '').trim())
+    sets.push('imerominia_gennisis=$img', 'birth_year=$byr')
+    params.$img = birth.display
+    params.$byr = birth.year
+    const cls = birth.year != null
+      ? grades.classify(birth.year, getSchoolYearStart(), getGradeRanges())
+      : null
+    if (cls) {
+      sets.push('computed_type=$cty', 'computed_grade=$cgr')
+      params.$cty = cls.category
+      params.$cgr = cls.grade
+    }
+  }
+
   if (!sets.length) return { ok: true }
   db.run(`UPDATE students SET ${sets.join(', ')}, updated_at=$now WHERE id=$id`, params)
   return { ok: true }

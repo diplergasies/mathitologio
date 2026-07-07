@@ -238,6 +238,34 @@ function pdfColIndex(x, anchors) {
   return j
 }
 
+// Ένωση κεφαλίδας που «σπάει» σε δεύτερη φυσική γραμμή (π.χ. «Ημερομηνία» στη μία γραμμή και
+// «γέννησης» ακριβώς από κάτω, στοιχισμένη στο ίδιο x). Για κάθε item της γραμμής-συνέχειας
+// βρίσκουμε το πλησιέστερο (κατά x) κελί κεφαλίδας και το ενώνουμε ΜΟΝΟ αν ο συνδυασμός δίνει
+// γνωστή πολυλεκτική κεφαλίδα — έτσι δεν κινδυνεύει να «καταπιεί» πραγματική γραμμή δεδομένων.
+// Μεταλλάσσει τα headerCells· επιστρέφει πόσα items ενώθηκαν.
+function pdfMergeWrappedHeader(headerCells, contRow) {
+  if (!contRow || !contRow.items.length) return 0
+  let merged = 0
+  for (const it of contRow.items) {
+    let best = -1
+    let bestDx = Infinity
+    headerCells.forEach((c, k) => {
+      const dx = Math.abs(c.x - it.x)
+      if (dx < bestDx) {
+        bestDx = dx
+        best = k
+      }
+    })
+    if (best < 0) continue
+    const combined = (headerCells[best].str + ' ' + it.str.trim()).replace(/\s+/g, ' ').trim()
+    if (pdfIsKnownHeader(combined)) {
+      headerCells[best] = { x: headerCells[best].x, str: combined }
+      merged++
+    }
+  }
+  return merged
+}
+
 // Ανακατασκευή 2D πίνακα από όλες τις σελίδες· rows[0] = ετικέτες κεφαλίδων.
 function pdfRowsFromPages(pages) {
   let headerCells = null
@@ -251,6 +279,7 @@ function pdfRowsFromPages(pages) {
     // Εντοπισμός γραμμής κεφαλίδων σε αυτή τη σελίδα (μέγιστες αναγνωρισμένες κεφαλίδες, ≥2).
     let headerIdx = -1
     let headerScore = 0
+    let contSkipIdx = -1 // γραμμή-συνέχεια κεφαλίδας που δεν πρέπει να γίνει γραμμή δεδομένων
     const perRowCells = lineRows.map((r) => pdfBuildHeaderCells(r.items))
     perRowCells.forEach((cells, idx) => {
       const score = cells.reduce((s, c) => s + (pdfIsKnownHeader(c.str) ? 1 : 0), 0)
@@ -262,15 +291,20 @@ function pdfRowsFromPages(pages) {
 
     if (headerScore >= 2) {
       headerCells = perRowCells[headerIdx]
+      // Ενσωμάτωση τυχόν γραμμής-συνέχειας κεφαλίδας (κεφαλίδα σε δύο γραμμές).
+      const contRow = lineRows[headerIdx + 1]
+      const merged = pdfMergeWrappedHeader(headerCells, contRow)
+      // Αν ΟΛΑ τα items της γραμμής-συνέχειας ενώθηκαν, μην την περάσεις ως γραμμή δεδομένων.
+      if (merged > 0 && merged === contRow.items.length) contSkipIdx = headerIdx + 1
       anchors = headerCells.map((c) => c.x)
       if (!out.length) out.push(headerCells.map((c) => c.str)) // κεφαλίδα μόνο μία φορά
     }
 
     if (!headerCells || !anchors) continue // χωρίς κεφαλίδα ακόμη → δεν μπορούμε να χαρτογραφήσουμε
 
-    // Γραμμές δεδομένων: όλες πλην της γραμμής κεφαλίδων αυτής της σελίδας.
+    // Γραμμές δεδομένων: όλες πλην της γραμμής κεφαλίδων (και της γραμμής-συνέχειας) αυτής της σελίδας.
     lineRows.forEach((r, idx) => {
-      if (idx === headerIdx) return
+      if (idx === headerIdx || idx === contSkipIdx) return
       const cols = new Array(headerCells.length).fill('')
       for (const it of r.items) {
         const j = pdfColIndex(it.x, anchors)

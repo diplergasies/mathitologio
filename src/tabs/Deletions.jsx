@@ -29,16 +29,21 @@ export default function Deletions({ version, bump }) {
     bump()
   }
 
+  async function saveCell(id, key, value) {
+    await api.updateStudent(id, { [key]: value })
+    bump()
+  }
+
   const columns = [
-    { key: 'eponymo', label: 'Επώνυμο' },
-    { key: 'onoma', label: 'Όνομα' },
-    { key: 'patronymo', label: 'Πατρώνυμο' },
-    { key: 'monada', label: 'Μονάδα' },
-    { key: 'dika', label: 'ΔΙΚΑ' },
-    { key: 'fylo', label: 'Φύλο' },
-    { key: 'imerominia_gennisis', label: 'Ημ. γέννησης' },
+    { key: 'eponymo', label: 'Επώνυμο', editable: true },
+    { key: 'onoma', label: 'Όνομα', editable: true },
+    { key: 'patronymo', label: 'Πατρώνυμο', editable: true },
+    { key: 'monada', label: 'Μονάδα', editable: true },
+    { key: 'dika', label: 'ΔΙΚΑ', editable: true },
+    { key: 'fylo', label: 'Φύλο', editable: true },
+    { key: 'imerominia_gennisis', label: 'Ημ. γέννησης', editable: true },
     { key: 'school_name', label: 'Σχολείο' },
-    { key: 'current_grade', label: 'Τάξη' },
+    { key: 'current_grade', label: 'Τάξη', editable: true },
     { key: 'deleted_at', label: 'Ημ. διαγραφής', render: (s) => fmtDeleted(s.deleted_at) },
     {
       key: 'deletion_reason',
@@ -151,6 +156,7 @@ export default function Deletions({ version, bump }) {
         selectedIds={sel.ids}
         onToggle={sel.toggle}
         onToggleAll={sel.toggleAll}
+        onCellSave={saveCell}
         renderActions={(s) => (
           <>
             <button

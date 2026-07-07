@@ -40,14 +40,19 @@ export default function Students({ version, bump }) {
     bump()
   }
 
+  async function saveCell(id, key, value) {
+    await api.updateStudent(id, { [key]: value })
+    bump()
+  }
+
   const columns = [
-    { key: 'eponymo', label: 'Επώνυμο' },
-    { key: 'onoma', label: 'Όνομα' },
-    { key: 'patronymo', label: 'Πατρώνυμο' },
-    { key: 'monada', label: 'Μονάδα' },
-    { key: 'dika', label: 'ΔΙΚΑ' },
-    { key: 'fylo', label: 'Φύλο' },
-    { key: 'imerominia_gennisis', label: 'Ημ. γέννησης', sortable: true, sortAccessor: birthSortValue },
+    { key: 'eponymo', label: 'Επώνυμο', editable: true },
+    { key: 'onoma', label: 'Όνομα', editable: true },
+    { key: 'patronymo', label: 'Πατρώνυμο', editable: true },
+    { key: 'monada', label: 'Μονάδα', editable: true },
+    { key: 'dika', label: 'ΔΙΚΑ', editable: true },
+    { key: 'fylo', label: 'Φύλο', editable: true },
+    { key: 'imerominia_gennisis', label: 'Ημ. γέννησης', sortable: true, sortAccessor: birthSortValue, editable: true },
     {
       key: 'school_name',
       label: 'Σχολείο',
@@ -61,7 +66,7 @@ export default function Students({ version, bump }) {
       label: 'Τάξη',
       render: (s) => <GradeCell student={s} onChanged={bump} />,
     },
-    { key: 'imerominia_afixis', label: 'Ημ. άφιξης' },
+    { key: 'imerominia_afixis', label: 'Ημ. άφιξης', editable: true },
     {
       key: 'epitropos',
       label: 'Επίτροπος',
@@ -148,6 +153,7 @@ export default function Students({ version, bump }) {
         selectedIds={sel.ids}
         onToggle={sel.toggle}
         onToggleAll={sel.toggleAll}
+        onCellSave={saveCell}
         renderActions={(s) => (
           <>
             <button

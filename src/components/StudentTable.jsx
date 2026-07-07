@@ -1,4 +1,4 @@
-import { useMemo, useState } from 'react'
+import { useMemo, useRef, useState } from 'react'
 import { ArrowDown, ArrowUp, ChevronsUpDown, Search, X } from 'lucide-react'
 import { batchColor } from '../colors'
 import { fold, studentHaystack, matchSegments } from '../search'
@@ -11,6 +11,7 @@ import { fold, studentHaystack, matchSegments } from '../search'
 // searchable: εμφανίζει πεδίο εύρεσης (live, σε όλα τα στοιχεία του μαθητή).
 // renderActions?(student) -> JSX για τη στήλη ενεργειών.
 // selectable: εμφανίζει checkboxes. selectedIds: array. onToggle(id). onToggleAll(visibleIds, checked).
+// onCellSave(id, key, value): αποθήκευση inline επεξεργασίας κελιού (για στήλες με editable: true).
 export default function StudentTable({
   students,
   columns,
@@ -21,9 +22,13 @@ export default function StudentTable({
   selectedIds = [],
   onToggle,
   onToggleAll,
+  onCellSave,
 }) {
   const [sort, setSort] = useState(null) // { key, dir: 'asc'|'desc' }
   const [q, setQ] = useState('')
+  const [editing, setEditing] = useState(null) // { id, key } του κελιού σε επεξεργασία
+  const [draft, setDraft] = useState('')
+  const cancelRef = useRef(false) // αποτρέπει αποθήκευση όταν το blur ακολουθεί Escape
 
   const term = q.trim()
 
@@ -78,6 +83,63 @@ export default function StudentTable({
         <span key={i}>{seg.text}</span>
       )
     )
+  }
+
+  function beginEdit(s, c) {
+    const raw = s[c.key]
+    setDraft(raw == null ? '' : String(raw))
+    setEditing({ id: s.id, key: c.key })
+  }
+
+  async function commitEdit(s, c) {
+    if (cancelRef.current) {
+      cancelRef.current = false
+      setEditing(null)
+      return
+    }
+    const value = draft.trim()
+    const orig = s[c.key] == null ? '' : String(s[c.key]).trim()
+    setEditing(null)
+    if (value !== orig && onCellSave) await onCellSave(s.id, c.key, value)
+  }
+
+  // Απόδοση κελιού: input σε επεξεργασία, αλλιώς (για editable στήλες) κλικαρόμενη τιμή.
+  function renderCell(c, s) {
+    const isEditing = c.editable && editing && editing.id === s.id && editing.key === c.key
+    if (isEditing) {
+      return (
+        <input
+          autoFocus
+          value={draft}
+          onChange={(e) => setDraft(e.target.value)}
+          onBlur={() => commitEdit(s, c)}
+          onKeyDown={(e) => {
+            if (e.key === 'Enter') {
+              e.preventDefault()
+              e.currentTarget.blur()
+            } else if (e.key === 'Escape') {
+              e.preventDefault()
+              cancelRef.current = true
+              e.currentTarget.blur()
+            }
+          }}
+          className="w-full min-w-[6rem] rounded border border-blue-400 bg-white px-1.5 py-0.5 text-sm text-slate-800 focus:outline-none"
+        />
+      )
+    }
+    if (c.editable && onCellSave) {
+      return (
+        <button
+          type="button"
+          onClick={() => beginEdit(s, c)}
+          title="Κλικ για επεξεργασία"
+          className="w-full cursor-text rounded px-1 text-left hover:bg-blue-50/70 hover:ring-1 hover:ring-blue-200"
+        >
+          {cellContent(c, s)}
+        </button>
+      )
+    }
+    return cellContent(c, s)
   }
 
   const searchBox = searchable ? (
@@ -192,7 +254,7 @@ export default function StudentTable({
                     )}
                     {columns.map((c) => (
                       <td key={c.key} className="whitespace-nowrap px-3 py-2 text-slate-700" data-selectable>
-                        {cellContent(c, s)}
+                        {renderCell(c, s)}
                       </td>
                     ))}
                     {renderActions && (
