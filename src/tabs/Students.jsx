@@ -9,6 +9,7 @@ import SchoolCell from '../components/SchoolCell'
 import GradeCell from '../components/GradeCell'
 import { useSelection } from '../useSelection'
 import { birthSortValue } from '../sort'
+import { isoToDMY } from '../calendarUtils'
 import { FileText, Trash2, Users, Hash } from 'lucide-react'
 
 export default function Students({ version, bump }) {
@@ -67,6 +68,13 @@ export default function Students({ version, bump }) {
       render: (s) => <GradeCell student={s} onChanged={bump} />,
     },
     { key: 'imerominia_afixis', label: 'Ημ. άφιξης', editable: true },
+    {
+      key: 'enrolled_at',
+      label: 'Ημ. εγγραφής',
+      editable: true,
+      render: (s) => isoToDMY(s.enrolled_at) || '—',
+      editAccessor: (s) => isoToDMY(s.enrolled_at),
+    },
     {
       key: 'epitropos',
       label: 'Επίτροπος',

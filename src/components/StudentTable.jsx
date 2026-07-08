@@ -86,7 +86,9 @@ export default function StudentTable({
   }
 
   function beginEdit(s, c) {
-    const raw = s[c.key]
+    // editAccessor: τιμή για το input όταν το αποθηκευμένο s[key] δεν είναι κατάλληλο για
+    // επεξεργασία (π.χ. ISO ημερομηνία που εμφανίζεται μέσω render ως DD/MM/YYYY).
+    const raw = c.editAccessor ? c.editAccessor(s) : s[c.key]
     setDraft(raw == null ? '' : String(raw))
     setEditing({ id: s.id, key: c.key })
   }
@@ -98,7 +100,8 @@ export default function StudentTable({
       return
     }
     const value = draft.trim()
-    const orig = s[c.key] == null ? '' : String(s[c.key]).trim()
+    const origRaw = c.editAccessor ? c.editAccessor(s) : s[c.key]
+    const orig = origRaw == null ? '' : String(origRaw).trim()
     setEditing(null)
     if (value !== orig && onCellSave) await onCellSave(s.id, c.key, value)
   }

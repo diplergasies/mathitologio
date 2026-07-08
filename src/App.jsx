@@ -6,13 +6,15 @@ import Deletions from './tabs/Deletions'
 import Settings from './tabs/Settings'
 import Report from './tabs/Report'
 import Observatory from './tabs/Observatory'
+import Calendar from './tabs/Calendar'
 import HelpModal from './components/HelpModal'
-import { Upload, FileText, Download, Database, PlaneLanding, Users, Trash2, Settings as SettingsIcon, BarChart3, ClipboardList, BookOpen, HelpCircle } from 'lucide-react'
+import { Upload, FileText, Download, Database, PlaneLanding, Users, Trash2, Settings as SettingsIcon, BarChart3, ClipboardList, CalendarDays, BookOpen, HelpCircle } from 'lucide-react'
 
 const TABS = [
   { id: 'arrivals', label: 'Αφίξεις', icon: PlaneLanding, Comp: Arrivals },
   { id: 'students', label: 'Μαθητές', icon: Users, Comp: Students },
   { id: 'deletions', label: 'Διαγραφές', icon: Trash2, Comp: Deletions },
+  { id: 'calendar', label: 'Ημερολόγιο', icon: CalendarDays, Comp: Calendar },
   { id: 'settings', label: 'Ρυθμίσεις', icon: SettingsIcon, Comp: Settings },
   { id: 'report', label: 'Αποτύπωση', icon: BarChart3, Comp: Report },
   { id: 'observatory', label: 'Παρατηρητήριο', icon: ClipboardList, Comp: Observatory },

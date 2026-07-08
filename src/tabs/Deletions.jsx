@@ -3,6 +3,7 @@ import api from '../api'
 import StudentTable from '../components/StudentTable'
 import { useSelection } from '../useSelection'
 import { Undo2, Users, Trash2, Pencil, Check, X } from 'lucide-react'
+import { isoToDMY } from '../calendarUtils'
 
 function fmtDeleted(iso) {
   if (!iso) return '—'
@@ -44,7 +45,13 @@ export default function Deletions({ version, bump }) {
     { key: 'imerominia_gennisis', label: 'Ημ. γέννησης', editable: true },
     { key: 'school_name', label: 'Σχολείο' },
     { key: 'current_grade', label: 'Τάξη', editable: true },
-    { key: 'deleted_at', label: 'Ημ. διαγραφής', render: (s) => fmtDeleted(s.deleted_at) },
+    {
+      key: 'deleted_at',
+      label: 'Ημ. διαγραφής',
+      editable: true,
+      render: (s) => fmtDeleted(s.deleted_at),
+      editAccessor: (s) => isoToDMY(s.deleted_at),
+    },
     {
       key: 'deletion_reason',
       label: 'Λόγος διαγραφής',

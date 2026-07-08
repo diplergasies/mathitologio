@@ -61,4 +61,9 @@ contextBridge.exposeInMainWorld('api', {
 
   monthlyStats: (period) => ipcRenderer.invoke('stats:monthly', period),
   observatoryStats: (period) => ipcRenderer.invoke('stats:observatory', period),
+
+  calendarEvents: (range) => ipcRenderer.invoke('calendar:events', range),
+  addCalendarNote: (payload) => ipcRenderer.invoke('calendar:addNote', payload),
+  updateCalendarNote: (payload) => ipcRenderer.invoke('calendar:updateNote', payload),
+  deleteCalendarNote: (id) => ipcRenderer.invoke('calendar:deleteNote', id),
 })

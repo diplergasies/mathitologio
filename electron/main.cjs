@@ -49,6 +49,40 @@ function todayDisplay() {
   return `${String(d.getDate()).padStart(2, '0')}/${String(d.getMonth() + 1).padStart(2, '0')}/${d.getFullYear()}`
 }
 
+// 'DD/MM/YYYY' -> [y, m, d] (numbers) ή null.
+function dmyParts(display) {
+  const m = String(display || '').match(/^(\d{2})\/(\d{2})\/(\d{4})$/)
+  return m ? [Number(m[3]), Number(m[2]), Number(m[1])] : null
+}
+
+// Νέα ISO ημερομηνία από 'DD/MM/YYYY', κρατώντας την ώρα της υπάρχουσας ISO (fallback 12:00
+// για αποφυγή μετατόπισης ημέρας σε ζώνες UTC±). Επιστρέφει null αν το display δεν αναλύεται.
+function toIsoKeepingTime(existingIso, display) {
+  const p = dmyParts(display)
+  if (!p) return null
+  const [y, mo, d] = p
+  const old = existingIso ? new Date(existingIso) : null
+  const hh = old && !isNaN(old) ? old.getHours() : 12
+  const mm = old && !isNaN(old) ? old.getMinutes() : 0
+  const ss = old && !isNaN(old) ? old.getSeconds() : 0
+  const ms = old && !isNaN(old) ? old.getMilliseconds() : 0
+  return new Date(y, mo - 1, d, hh, mm, ss, ms).toISOString()
+}
+
+// ISO datetime -> 'YYYY-MM-DD' (τοπικά components) ή '' αν άκυρο.
+function isoToKey(iso) {
+  if (!iso) return ''
+  const d = new Date(iso)
+  if (isNaN(d)) return ''
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`
+}
+
+// 'DD/MM/YYYY' (ή ό,τι κανονικοποιεί ο parseBirthDate) -> 'YYYY-MM-DD' ή '' αν αποτύχει.
+function displayToKey(display) {
+  const p = dmyParts(display)
+  return p ? `${p[0]}-${String(p[1]).padStart(2, '0')}-${String(p[2]).padStart(2, '0')}` : ''
+}
+
 // Έτος έναρξης σχολικού έτους: από τις Ρυθμίσεις (αν οριστεί) αλλιώς αυτόματο από την ημερομηνία.
 function getSchoolYearStart() {
   const v = db.getAllSettings().schoolYearStart
@@ -503,7 +537,7 @@ ipcMain.handle('students:restore', (_e, id) => {
 // ονομάτων στηλών (όχι από το key του client) ώστε να μη γίνεται SQL injection.
 const EDITABLE_TEXT_COLS = [
   'monada', 'dika', 'onoma', 'eponymo', 'patronymo', 'mitronymo',
-  'fylo', 'glossa', 'ithageneia', 'imerominia_afixis',
+  'fylo', 'glossa', 'ithageneia',
   'epitropos', 'asynodeftos', 'eidiki_agogi', 'current_grade',
 ]
 
@@ -522,6 +556,32 @@ ipcMain.handle('students:update', (_e, { id, fields }) => {
   if (fields.deletion_reason !== undefined) {
     sets.push('deletion_reason=$dr')
     params.$dr = fields.deletion_reason || null
+  }
+
+  // Ημερομηνία άφιξης: κανονικοποίηση σε 'DD/MM/YYYY' (ομοιομορφία με το σύστημα).
+  if (fields.imerominia_afixis !== undefined) {
+    const v = String(fields.imerominia_afixis || '').trim()
+    sets.push('imerominia_afixis=$iaf')
+    params.$iaf = v ? importer.parseBirthDate(v).display : ''
+  }
+
+  // Ημ. διαγραφής/εγγραφής: αποθηκεύονται ως ISO με ώρα. Ο χρήστης δίνει 'DD/MM/YYYY'· κρατάμε
+  // την αρχική ώρα. Ονόματα στηλών = literals (όχι από client key) → χωρίς SQL injection.
+  for (const col of ['deleted_at', 'enrolled_at']) {
+    if (fields[col] === undefined) continue
+    const raw = String(fields[col] || '').trim()
+    if (!raw) {
+      sets.push(`${col}=NULL`)
+      continue
+    }
+    const disp = importer.parseBirthDate(raw).display
+    const cur = db.query(`SELECT ${col} AS v FROM students WHERE id=$id`, { $id: id })
+    const iso = toIsoKeepingTime(cur.length ? cur[0].v : null, disp)
+    if (iso) {
+      const p = '$' + col
+      sets.push(`${col}=${p}`)
+      params[p] = iso
+    }
   }
 
   // Ημερομηνία γέννησης: ανάλυση → ενημέρωση εμφανιζόμενης τιμής + έτους, και επανακατάταξη
@@ -543,6 +603,68 @@ ipcMain.handle('students:update', (_e, { id, fields }) => {
 
   if (!sets.length) return { ok: true }
   db.run(`UPDATE students SET ${sets.join(', ')}, updated_at=$now WHERE id=$id`, params)
+  return { ok: true }
+})
+
+// ---- Ημερολόγιο -----------------------------------------------------------
+// Ενοποιημένη λίστα γεγονότων: χειροκίνητες σημειώσεις (πίνακας calendar_notes) +
+// αυτόματα γεγονότα μαθητών (άφιξη/εγγραφή/διαγραφή), παραγόμενα δυναμικά.
+ipcMain.handle('calendar:events', (_e, range = {}) => {
+  const events = []
+
+  // Χειροκίνητες σημειώσεις.
+  for (const n of db.query('SELECT id, date, title, note FROM calendar_notes')) {
+    events.push({ kind: 'note', date: n.date, title: n.title, note: n.note || '', noteId: n.id })
+  }
+
+  // Γεγονότα μαθητών.
+  const rows = db.query(
+    `SELECT s.id, s.eponymo, s.onoma, s.status, s.prev_status,
+            s.imerominia_afixis, s.enrolled_at, s.deleted_at, sch.name AS school_name
+       FROM students s LEFT JOIN schools sch ON sch.id = s.school_id`
+  )
+  for (const s of rows) {
+    const name = `${s.eponymo || ''} ${s.onoma || ''}`.trim()
+    if (s.status === 'arrival' || s.status === 'enrolled') {
+      // parseBirthDate κανονικοποιεί και παλαιές μη-zero-padded τιμές (π.χ. '7/5/2025').
+      const key = displayToKey(importer.parseBirthDate(s.imerominia_afixis).display)
+      if (key) events.push({ kind: 'arrival', date: key, title: name, studentId: s.id })
+    }
+    if (s.status === 'enrolled' || s.prev_status === 'enrolled') {
+      const key = isoToKey(s.enrolled_at)
+      if (key) events.push({ kind: 'enrollment', date: key, title: name, studentId: s.id, school: s.school_name || '' })
+    }
+    if (s.status === 'deleted') {
+      const key = isoToKey(s.deleted_at)
+      if (key) events.push({ kind: 'deletion', date: key, title: name, studentId: s.id })
+    }
+  }
+
+  // Προαιρετικό φιλτράρισμα εύρους (YYYY-MM-DD, ημερολογιακά ασφαλής σύγκριση strings).
+  const { from, to } = range || {}
+  return events.filter((e) => (!from || e.date >= from) && (!to || e.date <= to))
+})
+
+ipcMain.handle('calendar:addNote', (_e, { date, title, note } = {}) => {
+  const now = nowIso()
+  db.run(
+    `INSERT INTO calendar_notes (date, title, note, created_at, updated_at)
+     VALUES ($d, $t, $n, $c, $c)`,
+    { $d: String(date || '').trim(), $t: String(title || '').trim(), $n: note ? String(note) : null, $c: now }
+  )
+  return { ok: true }
+})
+
+ipcMain.handle('calendar:updateNote', (_e, { id, date, title, note } = {}) => {
+  db.run(
+    `UPDATE calendar_notes SET date=$d, title=$t, note=$n, updated_at=$u WHERE id=$id`,
+    { $d: String(date || '').trim(), $t: String(title || '').trim(), $n: note ? String(note) : null, $u: nowIso(), $id: id }
+  )
+  return { ok: true }
+})
+
+ipcMain.handle('calendar:deleteNote', (_e, id) => {
+  db.run('DELETE FROM calendar_notes WHERE id=$id', { $id: id })
   return { ok: true }
 })
 
