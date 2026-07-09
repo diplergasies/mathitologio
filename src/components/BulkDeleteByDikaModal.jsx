@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import Modal from './Modal'
 import api from '../api'
 import { AlertTriangle } from 'lucide-react'
@@ -8,15 +8,33 @@ function normDika(v) {
   return String(v == null ? '' : v).replace(/\s+/g, '')
 }
 
+// Ετικέτα κατάστασης μαθητή για την προεπισκόπηση.
+function statusLabel(st) {
+  return st === 'arrival' ? 'Άφιξη' : st === 'enrolled' ? 'Εγγεγραμμένος' : st || '—'
+}
+
 // Μαζική διαγραφή μαθητών με βάση λίστα αριθμών ΔΙΚΑ (χωρισμένων με κόμμα).
-// students: η τρέχουσα λίστα της καρτέλας (αφίξεις ή εγγεγραμμένοι) — scope αναζήτησης.
-export default function BulkDeleteByDikaModal({ students, onClose, onDeleted }) {
+// Ψάχνει ΤΑΥΤΟΧΡΟΝΑ σε αφίξεις + εγγεγραμμένους — ανεξάρτητα από την καρτέλα που το άνοιξε.
+export default function BulkDeleteByDikaModal({ onClose, onDeleted }) {
   const [text, setText] = useState('')
   const [preview, setPreview] = useState(null) // { matched: [...], notFound: [...] }
   const [reason, setReason] = useState('')
   const [busy, setBusy] = useState(false)
+  const [scope, setScope] = useState(null) // συνδυασμένη λίστα (αφίξεις + εγγεγραμμένοι)· null = φορτώνει
+
+  // Φόρτωση και των δύο λιστών ώστε η αναζήτηση ΔΙΚΑ να καλύπτει όλο τον ενεργό πληθυσμό.
+  useEffect(() => {
+    let alive = true
+    Promise.all([api.listStudents('arrival'), api.listStudents('enrolled')]).then(([a, e]) => {
+      if (alive) setScope([...(a || []), ...(e || [])])
+    })
+    return () => {
+      alive = false
+    }
+  }, [])
 
   function search() {
+    if (!scope) return
     // Διαχωρισμός σε κόμμα / άνω-κάτω τελεία / νέα γραμμή, καθάρισμα & dedupe.
     const tokens = [...new Set(
       text
@@ -26,7 +44,7 @@ export default function BulkDeleteByDikaModal({ students, onClose, onDeleted }) 
     )]
 
     const byDika = new Map()
-    for (const s of students) byDika.set(normDika(s.dika), s)
+    for (const s of scope) byDika.set(normDika(s.dika), s)
 
     const matched = []
     const seen = new Set()
@@ -61,10 +79,10 @@ export default function BulkDeleteByDikaModal({ students, onClose, onDeleted }) 
       </button>
       <button
         onClick={search}
-        disabled={!text.trim()}
+        disabled={!text.trim() || !scope}
         className="rounded-md bg-blue-600 px-3 py-1.5 text-sm font-medium text-white hover:bg-blue-700 disabled:opacity-40"
       >
-        ΟΚ
+        {scope ? 'ΟΚ' : 'Φόρτωση…'}
       </button>
     </>
   ) : (
@@ -90,7 +108,8 @@ export default function BulkDeleteByDikaModal({ students, onClose, onDeleted }) 
       {!preview ? (
         <div className="space-y-2">
           <p className="text-sm text-slate-600">
-            Επικόλλησε τους αριθμούς <strong>ΔΙΚΑ</strong> των μαθητών, χωρισμένους με κόμμα (,).
+            Επικόλλησε τους αριθμούς <strong>ΔΙΚΑ</strong> των μαθητών, χωρισμένους με κόμμα (,). Η
+            αναζήτηση καλύπτει <strong>και τις Αφίξεις και τους Μαθητές</strong>.
           </p>
           <textarea
             value={text}
@@ -114,6 +133,7 @@ export default function BulkDeleteByDikaModal({ students, onClose, onDeleted }) 
                       <th className="px-3 py-1.5 font-semibold">Μαθητής</th>
                       <th className="px-3 py-1.5 font-semibold">ΔΙΚΑ</th>
                       <th className="px-3 py-1.5 font-semibold">Μονάδα</th>
+                      <th className="px-3 py-1.5 font-semibold">Κατάσταση</th>
                     </tr>
                   </thead>
                   <tbody>
@@ -124,6 +144,7 @@ export default function BulkDeleteByDikaModal({ students, onClose, onDeleted }) 
                         </td>
                         <td className="px-3 py-1.5 text-slate-600">{s.dika || '—'}</td>
                         <td className="px-3 py-1.5 text-slate-500">{s.monada || '—'}</td>
+                        <td className="px-3 py-1.5 text-slate-500">{statusLabel(s.status)}</td>
                       </tr>
                     ))}
                   </tbody>
@@ -132,7 +153,7 @@ export default function BulkDeleteByDikaModal({ students, onClose, onDeleted }) 
             </div>
           ) : (
             <p className="rounded-md bg-slate-50 p-2 text-slate-500">
-              Κανένας μαθητής δεν βρέθηκε με τους ΔΙΚΑ που έδωσες σε αυτήν την καρτέλα.
+              Κανένας μαθητής δεν βρέθηκε με τους ΔΙΚΑ που έδωσες (σε Αφίξεις ή Μαθητές).
             </p>
           )}
 

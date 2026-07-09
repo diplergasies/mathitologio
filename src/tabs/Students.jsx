@@ -213,7 +213,6 @@ export default function Students({ version, bump }) {
 
       {dikaDelete && (
         <BulkDeleteByDikaModal
-          students={students}
           onClose={() => setDikaDelete(false)}
           onDeleted={() => {
             sel.clear()

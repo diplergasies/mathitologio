@@ -149,7 +149,6 @@ export default function Arrivals({ version, bump }) {
 
       {dikaDelete && (
         <BulkDeleteByDikaModal
-          students={students}
           onClose={() => setDikaDelete(false)}
           onDeleted={() => {
             sel.clear()
