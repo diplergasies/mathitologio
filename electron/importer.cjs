@@ -270,6 +270,7 @@ function pdfMergeWrappedHeader(headerCells, contRow) {
 function pdfRowsFromPages(pages) {
   let headerCells = null
   let anchors = null
+  let lastDataRow = null // τελευταία πραγματική γραμμή δεδομένων (για κάθετη συγχώνευση σπασμένων κελιών)
   const out = []
 
   for (const page of pages) {
@@ -302,6 +303,20 @@ function pdfRowsFromPages(pages) {
 
     if (!headerCells || !anchors) continue // χωρίς κεφαλίδα ακόμη → δεν μπορούμε να χαρτογραφήσουμε
 
+    // Ανίχνευση «γραμμών-συνέχειας δεδομένων»: τιμή κελιού που «σπάει» σε 2η φυσική γραμμή
+    // (π.χ. κωδικός Μονάδας «DRM- BU01-»/«A014», ή Ιθαγένεια «ΝΟΤΙΟ»/«ΣΟΥΔΑΝ») εμφανίζεται ως
+    // ξεχωριστή clustered γραμμή. Δύο κριτήρια, ώστε να ΜΗΝ «καταπιεί» footer/header (π.χ. «ΣΕΠ»,
+    // ημ/νία+ώρα, «5 από 11»):
+    //   (α) καμία «core» στήλη ταυτότητας (ΔΙΚΑ/Όνομα/Επώνυμο) — τις έχει πάντα πραγματικός μαθητής,
+    //   (β) ΟΛΕΣ οι μη-κενές στήλες της ανήκουν στις «σπάσιμες» (Μονάδα/Ιθαγένεια) του format.
+    const idHeaderMap = buildHeaderMap(headerCells.map((c) => c.str))
+    const coreIdIdxs = ['dika', 'onoma', 'eponymo']
+      .map((f) => idHeaderMap[f])
+      .filter((i) => i !== undefined)
+    const mergeableIdxs = ['monada', 'ithageneia']
+      .map((f) => idHeaderMap[f])
+      .filter((i) => i !== undefined)
+
     // Γραμμές δεδομένων: όλες πλην της γραμμής κεφαλίδων (και της γραμμής-συνέχειας) αυτής της σελίδας.
     lineRows.forEach((r, idx) => {
       if (idx === headerIdx || idx === contSkipIdx) return
@@ -310,7 +325,27 @@ function pdfRowsFromPages(pages) {
         const j = pdfColIndex(it.x, anchors)
         cols[j] = cols[j] ? cols[j] + ' ' + it.str.trim() : it.str.trim()
       }
-      if (cols.some((c) => c !== '')) out.push(cols.map((c) => c.replace(/\s+/g, ' ').trim()))
+      const norm = cols.map((c) => c.replace(/\s+/g, ' ').trim())
+      const nonEmpty = norm.reduce((acc, c, j) => (c ? (acc.push(j), acc) : acc), [])
+      if (nonEmpty.length === 0) return
+
+      const isContinuation =
+        !!lastDataRow &&
+        coreIdIdxs.length > 0 &&
+        coreIdIdxs.every((i) => !norm[i]) &&
+        nonEmpty.every((j) => mergeableIdxs.includes(j))
+      if (isContinuation) {
+        // Προσάρτηση κάθε μη-κενού κελιού στην προηγούμενη πραγματική γραμμή (κάθετη συγχώνευση).
+        nonEmpty.forEach((j) => {
+          lastDataRow[j] = (lastDataRow[j] ? lastDataRow[j] + ' ' + norm[j] : norm[j])
+            .replace(/\s+/g, ' ')
+            .trim()
+        })
+        return
+      }
+
+      out.push(norm)
+      lastDataRow = norm
     })
   }
 

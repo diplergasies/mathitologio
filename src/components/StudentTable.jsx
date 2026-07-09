@@ -29,6 +29,7 @@ export default function StudentTable({
   const [editing, setEditing] = useState(null) // { id, key } του κελιού σε επεξεργασία
   const [draft, setDraft] = useState('')
   const cancelRef = useRef(false) // αποτρέπει αποθήκευση όταν το blur ακολουθεί Escape
+  const [anchorId, setAnchorId] = useState(null) // άγκυρα για επιλογή εύρους με shift+κλικ
 
   const term = q.trim()
 
@@ -182,6 +183,23 @@ export default function StudentTable({
   const visibleIds = processed.map((s) => s.id)
   const allChecked = visibleIds.length > 0 && visibleIds.every((id) => selected.has(id))
 
+  // Επιλογή γραμμής: με shift+κλικ επιλέγεται όλο το εύρος από την άγκυρα ως την τρέχουσα
+  // γραμμή (κατά την ΕΜΦΑΝΙΖΟΜΕΝΗ σειρά· επαναχρησιμοποιεί το onToggleAll). Αλλιώς απλή εναλλαγή.
+  const handleSelectClick = (id, e) => {
+    if (e.shiftKey && anchorId != null) {
+      const a = visibleIds.indexOf(anchorId)
+      const b = visibleIds.indexOf(id)
+      if (a !== -1 && b !== -1) {
+        const [lo, hi] = a <= b ? [a, b] : [b, a]
+        onToggleAll(visibleIds.slice(lo, hi + 1), true)
+        setAnchorId(id)
+        return
+      }
+    }
+    onToggle(id)
+    setAnchorId(id)
+  }
+
   return (
     <div>
       {searchBox}
@@ -252,7 +270,12 @@ export default function StudentTable({
                   >
                     {selectable && (
                       <td className="px-3 py-2">
-                        <input type="checkbox" checked={isSel} onChange={() => onToggle(s.id)} />
+                        <input
+                          type="checkbox"
+                          checked={isSel}
+                          onChange={() => {}}
+                          onClick={(e) => handleSelectClick(s.id, e)}
+                        />
                       </td>
                     )}
                     {columns.map((c) => (
