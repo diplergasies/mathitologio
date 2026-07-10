@@ -13,6 +13,11 @@ function statusLabel(st) {
   return st === 'arrival' ? 'Άφιξη' : st === 'enrolled' ? 'Εγγεγραμμένος' : st || '—'
 }
 
+// Τι θα συμβεί ανά μαθητή: οι αφίξεις διαγράφονται οριστικά, οι εγγεγραμμένοι πάνε στις Διαγραφές.
+function actionLabel(st) {
+  return st === 'arrival' ? 'Οριστική διαγραφή' : 'Στις Διαγραφές'
+}
+
 // Μαζική διαγραφή μαθητών με βάση λίστα αριθμών ΔΙΚΑ (χωρισμένων με κόμμα).
 // Ψάχνει ΤΑΥΤΟΧΡΟΝΑ σε αφίξεις + εγγεγραμμένους — ανεξάρτητα από την καρτέλα που το άνοιξε.
 export default function BulkDeleteByDikaModal({ onClose, onDeleted }) {
@@ -61,9 +66,14 @@ export default function BulkDeleteByDikaModal({ onClose, onDeleted }) {
     setPreview({ matched, notFound })
   }
 
+  // Αφίξεις -> οριστική διαγραφή (purge)· εγγεγραμμένοι -> μαλακή διαγραφή (καρτέλα Διαγραφές).
+  const purgeIds = preview ? preview.matched.filter((s) => s.status === 'arrival').map((s) => s.id) : []
+  const softIds = preview ? preview.matched.filter((s) => s.status === 'enrolled').map((s) => s.id) : []
+
   async function confirmDelete() {
     setBusy(true)
-    await api.bulkDelete(preview.matched.map((s) => s.id), reason.trim())
+    if (purgeIds.length) await api.bulkPurge(purgeIds)
+    if (softIds.length) await api.bulkDelete(softIds, reason.trim())
     setBusy(false)
     onDeleted(preview.matched.length)
     onClose()
@@ -98,7 +108,11 @@ export default function BulkDeleteByDikaModal({ onClose, onDeleted }) {
         disabled={busy || preview.matched.length === 0}
         className="rounded-md bg-red-600 px-3 py-1.5 text-sm font-medium text-white hover:bg-red-700 disabled:opacity-40"
       >
-        {busy ? 'Γίνεται…' : `Διαγραφή ${preview.matched.length} μαθητών`}
+        {busy
+          ? 'Γίνεται…'
+          : purgeIds.length && softIds.length
+            ? `Διαγραφή ${preview.matched.length} (${purgeIds.length} οριστικά, ${softIds.length} στις Διαγραφές)`
+            : `Διαγραφή ${preview.matched.length} μαθητών`}
       </button>
     </>
   )
@@ -110,6 +124,11 @@ export default function BulkDeleteByDikaModal({ onClose, onDeleted }) {
           <p className="text-sm text-slate-600">
             Επικόλλησε τους αριθμούς <strong>ΔΙΚΑ</strong> των μαθητών, χωρισμένους με κόμμα (,). Η
             αναζήτηση καλύπτει <strong>και τις Αφίξεις και τους Μαθητές</strong>.
+          </p>
+          <p className="rounded-md bg-amber-50 p-2 text-xs text-amber-700">
+            Οι <strong>αφίξεις</strong> διαγράφονται <strong>οριστικά</strong> (δεν πηγαίνουν στις
+            Διαγραφές, δεν επαναφέρονται). Οι <strong>εγγεγραμμένοι</strong> πηγαίνουν στην καρτέλα
+            <strong> Διαγραφές</strong> (με δυνατότητα επαναφοράς).
           </p>
           <textarea
             value={text}
@@ -134,6 +153,7 @@ export default function BulkDeleteByDikaModal({ onClose, onDeleted }) {
                       <th className="px-3 py-1.5 font-semibold">ΔΙΚΑ</th>
                       <th className="px-3 py-1.5 font-semibold">Μονάδα</th>
                       <th className="px-3 py-1.5 font-semibold">Κατάσταση</th>
+                      <th className="px-3 py-1.5 font-semibold">Ενέργεια</th>
                     </tr>
                   </thead>
                   <tbody>
@@ -145,6 +165,13 @@ export default function BulkDeleteByDikaModal({ onClose, onDeleted }) {
                         <td className="px-3 py-1.5 text-slate-600">{s.dika || '—'}</td>
                         <td className="px-3 py-1.5 text-slate-500">{s.monada || '—'}</td>
                         <td className="px-3 py-1.5 text-slate-500">{statusLabel(s.status)}</td>
+                        <td
+                          className={`px-3 py-1.5 ${
+                            s.status === 'arrival' ? 'font-medium text-red-600' : 'text-slate-500'
+                          }`}
+                        >
+                          {actionLabel(s.status)}
+                        </td>
                       </tr>
                     ))}
                   </tbody>
@@ -157,10 +184,10 @@ export default function BulkDeleteByDikaModal({ onClose, onDeleted }) {
             </p>
           )}
 
-          {preview.matched.length > 0 && (
+          {softIds.length > 0 && (
             <div>
               <label className="mb-1 block text-sm text-slate-600">
-                Λόγος διαγραφής (προαιρετικό)
+                Λόγος διαγραφής (μόνο για όσους πάνε στις Διαγραφές, προαιρετικό)
               </label>
               <textarea
                 value={reason}
