@@ -72,3 +72,26 @@ jobs:
           files: release/*.exe
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      # Ανεβάζει το installer ΚΑΤΕΥΘΕΙΑΝ στον φάκελο Google Drive (μέσω rclone),
+      # ώστε να μη χρειάζεται λήψη στον υπολογιστή + επανα-ανέβασμα.
+      # Αδρανές μέχρι να οριστούν τα secrets RCLONE_CONF + GDRIVE_FOLDER_ID·
+      # continue-on-error ώστε τυχόν αποτυχία να ΜΗΝ ρίχνει το release.
+      - name: Upload installer to Google Drive
+        continue-on-error: true
+        shell: pwsh
+        env:
+          RCLONE_CONF: ${{ secrets.RCLONE_CONF }}
+          GDRIVE_FOLDER_ID: ${{ secrets.GDRIVE_FOLDER_ID }}
+        run: |
+          if ([string]::IsNullOrWhiteSpace($env:RCLONE_CONF) -or [string]::IsNullOrWhiteSpace($env:GDRIVE_FOLDER_ID)) {
+            Write-Host "Δεν έχουν οριστεί τα secrets RCLONE_CONF/GDRIVE_FOLDER_ID — παράλειψη ανεβάσματος στο Drive."
+            exit 0
+          }
+          choco install rclone -y --no-progress
+          $conf = Join-Path $env:APPDATA "rclone\rclone.conf"
+          New-Item -ItemType Directory -Force -Path (Split-Path $conf) | Out-Null
+          Set-Content -Path $conf -Value $env:RCLONE_CONF -Encoding utf8 -NoNewline
+          # Το remote στο rclone.conf πρέπει να λέγεται "gdrive". Ανεβάζει ΜΟΝΟ τα .exe στον φάκελο-στόχο.
+          rclone copy release/ "gdrive:" --drive-root-folder-id $env:GDRIVE_FOLDER_ID --include "*.exe" --progress
+          Write-Host "Το installer ανέβηκε στον φάκελο Drive (ID: $env:GDRIVE_FOLDER_ID)."
