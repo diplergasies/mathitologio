@@ -92,6 +92,7 @@ jobs:
           $conf = Join-Path $env:APPDATA "rclone\rclone.conf"
           New-Item -ItemType Directory -Force -Path (Split-Path $conf) | Out-Null
           Set-Content -Path $conf -Value $env:RCLONE_CONF -Encoding utf8 -NoNewline
-          # Το remote στο rclone.conf πρέπει να λέγεται "gdrive". Ανεβάζει ΜΟΝΟ τα .exe στον φάκελο-στόχο.
-          rclone copy release/ "gdrive:" --drive-root-folder-id $env:GDRIVE_FOLDER_ID --include "*.exe" --progress
+          # Το remote στο rclone.conf πρέπει να λέγεται "gdrive". Ανεβάζει ΜΟΝΟ το installer
+          # (Mathitologio-Setup-*.exe) — ΟΧΙ το win-unpacked/ με τα εσωτερικά .exe.
+          rclone copy release/ "gdrive:" --drive-root-folder-id $env:GDRIVE_FOLDER_ID --include "Mathitologio-Setup-*.exe" --max-depth 1 --progress
           Write-Host "Το installer ανέβηκε στον φάκελο Drive (ID: $env:GDRIVE_FOLDER_ID)."
