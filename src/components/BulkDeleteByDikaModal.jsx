@@ -184,10 +184,17 @@ export default function BulkDeleteByDikaModal({ onClose, onDeleted }) {
             </p>
           )}
 
+          {purgeIds.length > 0 && softIds.length === 0 && (
+            <p className="rounded-md bg-slate-50 p-2 text-xs text-slate-500">
+              Όλοι οι επιλεγμένοι είναι <strong>αφίξεις</strong> και διαγράφονται{' '}
+              <strong>οριστικά</strong> — δεν καταχωρείται λόγος αποχώρησης.
+            </p>
+          )}
+
           {softIds.length > 0 && (
             <div>
               <label className="mb-1 block text-sm text-slate-600">
-                Λόγος διαγραφής (μόνο για όσους πάνε στις Διαγραφές, προαιρετικό)
+                Λόγος αποχώρησης (μόνο για όσους πάνε στις Διαγραφές, προαιρετικό)
               </label>
               <textarea
                 value={reason}

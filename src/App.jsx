@@ -8,6 +8,7 @@ import Report from './tabs/Report'
 import Observatory from './tabs/Observatory'
 import Calendar from './tabs/Calendar'
 import HelpModal from './components/HelpModal'
+import DepartureDetectionModal from './components/DepartureDetectionModal'
 import { Upload, FileText, Download, Database, PlaneLanding, Users, Trash2, Settings as SettingsIcon, BarChart3, ClipboardList, CalendarDays, BookOpen, HelpCircle } from 'lucide-react'
 
 const TABS = [
@@ -26,6 +27,7 @@ export default function App() {
   const [info, setInfo] = useState(null)
   const [toast, setToast] = useState(null)
   const [showHelp, setShowHelp] = useState(false)
+  const [departures, setDepartures] = useState(null)
 
   const bump = () => setVersion((v) => v + 1)
 
@@ -61,6 +63,8 @@ export default function App() {
     showToast(msg, res.missingFields && res.missingFields.length ? 'warn' : 'ok')
     setTab('arrivals')
     bump()
+    // Ανίχνευση αποχωρήσεων: μαθητές που υπάρχουν ήδη αλλά λείπουν από τη νέα λίστα.
+    if (res.departed && res.departed.length) setDepartures(res.departed)
   }
 
   async function doImport() {
@@ -161,6 +165,14 @@ export default function App() {
       <main className="flex-1 overflow-auto p-5">{Active && <Active version={version} bump={bump} />}</main>
 
       {showHelp && <HelpModal onClose={() => setShowHelp(false)} />}
+
+      {departures && (
+        <DepartureDetectionModal
+          departed={departures}
+          onClose={() => setDepartures(null)}
+          onDone={bump}
+        />
+      )}
 
       {toast && (
         <div

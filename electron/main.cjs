@@ -321,7 +321,17 @@ function insertRecords(filePath, parsed) {
     imported++
   }
 
-  return { canceled: false, imported, excluded, duplicates, totalRows, missingFields, batchId }
+  // Ανίχνευση αποχωρήσεων: ενεργοί μαθητές (άφιξη/εγγεγραμμένοι) με μη-κενό ΔΙΚΑ που ΔΕΝ
+  // υπάρχει πλέον στη νέα λίστα (= δεν ανήκουν στον ενεργό πληθυσμό της δομής). Το σύνολο ΔΙΚΑ
+  // του αρχείου παίρνεται από ΟΛΑ τα records (ακόμη κι αν αποκλείστηκαν λόγω ηλικίας ή ήταν
+  // διπλά), αφού το αρχείο περιέχει όλες τις ηλικίες ενώ το Μαθητολόγιο κρατά μόνο σχολικές.
+  const norm = (v) => String(v == null ? '' : v).replace(/\s+/g, '')
+  const fileDikas = new Set(records.map((r) => norm(r.dika)).filter(Boolean))
+  const departed = db
+    .query("SELECT * FROM students WHERE status IN ('arrival','enrolled') AND dika != ''")
+    .filter((s) => !fileDikas.has(norm(s.dika)))
+
+  return { canceled: false, imported, excluded, duplicates, totalRows, missingFields, batchId, departed }
 }
 
 ipcMain.handle('import:xlsx', async () => {
