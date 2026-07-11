@@ -1,9 +1,9 @@
 {
   "name": "mathitologio",
   "productName": "Μαθητολόγιο",
-  "version": "1.5.1",
+  "version": "1.5.2",
   "description": "Ψηφιακό Μαθητολόγιο — διαχείριση μαθητικού πληθυσμού δομής φιλοξενίας",
-  "author": "Altos Web Design",
+  "author": "Κατσιαντρίδης Χρήστος",
   "license": "UNLICENSED",
   "private": true,
   "type": "module",
