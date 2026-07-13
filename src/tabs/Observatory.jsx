@@ -30,15 +30,19 @@ function buildA1Text(data) {
   }
   lines.push(`Σύνολο εγγραφών: ${data.total}`)
 
-  // Στο ΙΔΙΟ μπλοκ: οι διαγραφές της περιόδου (όσοι εγγράφηκαν στην περίοδο αλλά έχουν πλέον διαγραφεί).
-  lines.push('')
-  lines.push(`Διαγραφές περιόδου: ${data.deletedTotal}`)
+  // Στο ΙΔΙΟ μπλοκ: οι διαγραφές της περιόδου — ΜΟΝΟ ανά σχολείο & σύνολο (χωρίς ονόματα/ΔΙΚΑ).
+  const diagr = (n) => `${n} ${n === 1 ? 'διαγραφή' : 'διαγραφές'}`
+  const bySchoolDel = new Map()
   for (const d of data.deleted || []) {
-    const parts = [d.name || '—']
-    if (d.dika) parts.push(`ΔΙΚΑ ${d.dika}`)
-    if (d.school) parts.push(d.school)
-    lines.push(`• ${parts.join(' — ')}`)
+    const key = d.school || 'Χωρίς σχολείο'
+    bySchoolDel.set(key, (bySchoolDel.get(key) || 0) + 1)
   }
+  lines.push('')
+  lines.push('Διαγραφές περιόδου:')
+  ;[...bySchoolDel.entries()]
+    .sort((a, b) => a[0].localeCompare(b[0], 'el'))
+    .forEach(([school, n]) => lines.push(`${school}: ${diagr(n)}`))
+  lines.push(`Σύνολο: ${diagr(data.deletedTotal)}`)
 
   // Και στο τέλος το τελικό σύνολο (ενεργοί = εγγραφές − διαγραφές).
   lines.push('')
