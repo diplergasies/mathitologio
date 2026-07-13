@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react'
 import api from '../api'
 import CopyButton from '../components/CopyButton'
-import { ClipboardList, Layers, School, Accessibility } from 'lucide-react'
+import { ClipboardList, Layers, School, Accessibility, UserMinus } from 'lucide-react'
 
 const MONTHS = [
   'Ιανουάριος', 'Φεβρουάριος', 'Μάρτιος', 'Απρίλιος', 'Μάιος', 'Ιούνιος',
@@ -48,6 +48,17 @@ function buildA1Text(data) {
   lines.push('')
   lines.push(`Τελικό σύνολο (ενεργοί): ${data.activeTotal}`)
   return lines.join('\n')
+}
+
+// Γ3 — λόγοι διακοπής φοίτησης, ομαδοποιημένοι με πλήθος (χωρίς προσωπικά στοιχεία).
+// π.χ. «Αποχώρηση από την δομή (3 μαθητές) - Άτυπη φυγή (1 μαθητής)».
+function buildDropoutText(data) {
+  const reasons = data.dropoutReasons || []
+  if (!reasons.length) return 'Λόγος διακοπής: —'
+  const parts = reasons.map(
+    (r) => `${r.reason} (${r.count} ${r.count === 1 ? 'μαθητής' : 'μαθητές'})`
+  )
+  return `Λόγος διακοπής: ${parts.join(' - ')}`
 }
 
 // Επεξεργάσιμο πεδίο με έτοιμο κείμενο + κουμπί αντιγραφής ολόκληρου του κειμένου.
@@ -101,6 +112,8 @@ export default function Observatory({ version }) {
       noty: `Χωρίς Τμήμα Υποδοχής: ${data.withoutTY}`,
       eidiki: `Ειδική αγωγή/αναπηρία: ${data.eidiki}`,
       asyn: `Ασυνόδευτοι: ${data.asynodeftoi}`,
+      gamma1: `Μαθητές που διέκοψαν τη φοίτηση: ${data.dropoutTotal}`,
+      gamma3: buildDropoutText(data),
     })
   }, [data])
 
@@ -173,17 +186,35 @@ export default function Observatory({ version }) {
         />
       </Section>
 
-      {/* Α1.2–1.4 — τύπος προγράμματος */}
-      <Section icon={School} title="Α1.2–1.4 — Τύπος προγράμματος">
+      {/* Α1.2–1.4 — τύπος προγράμματος (τρέχουσα εικόνα: ενεργοί μαθητές) */}
+      <Section icon={School} title={`Α1.2–1.4 — Τύπος προγράμματος (ενεργοί: ${data.activeEnrolled})`}>
+        <p className="px-3 pt-2 text-xs text-slate-400">
+          Τρέχουσα εικόνα — υπολογίζονται από τους ενεργούς (εγγεγραμμένους) μαθητές, ανεξάρτητα περιόδου.
+        </p>
         <FieldText label="Α1.2 — ΔΥΕΠ" value={vals.dyep} onChange={set('dyep')} />
         <FieldText label="Α1.3 — με Τμήμα Υποδοχής" value={vals.ty} onChange={set('ty')} />
         <FieldText label="Α1.4 — χωρίς Τμήμα Υποδοχής" value={vals.noty} onChange={set('noty')} />
       </Section>
 
-      {/* Α1.5 & Α3.1 */}
-      <Section icon={Accessibility} title="Α1.5 / Α3.1 — Ειδικές κατηγορίες">
+      {/* Α1.5 & Α3.1 (τρέχουσα εικόνα: ενεργοί μαθητές) */}
+      <Section icon={Accessibility} title="Α1.5 / Α3.1 — Ειδικές κατηγορίες (ενεργοί)">
         <FieldText label="Α1.5 — Ειδική αγωγή / αναπηρία" value={vals.eidiki} onChange={set('eidiki')} />
         <FieldText label="Α3.1 — Ασυνόδευτοι" value={vals.asyn} onChange={set('asyn')} />
+      </Section>
+
+      {/* Γ — Ζητήματα σχολικής διαρροής (διακοπές φοίτησης της περιόδου) */}
+      <Section icon={UserMinus} title="Γ — Ζητήματα σχολικής διαρροής">
+        <p className="px-3 pt-2 text-xs text-slate-400">
+          Μαθητές που διέκοψαν τη φοίτηση μέσα στην περίοδο <span className="font-medium text-slate-500">{data.period}</span>
+          {' '}(εξαιρούνται οι απόφοιτοι).
+        </p>
+        <FieldText label="Γ1 — Μαθητές που διέκοψαν τη φοίτηση" value={vals.gamma1} onChange={set('gamma1')} />
+        <FieldText
+          label="Γ3 — Λόγος διακοπής (χωρίς προσωπικά στοιχεία)"
+          value={vals.gamma3}
+          onChange={set('gamma3')}
+          rows={Math.min(2 + (data.dropoutReasons?.length || 0), 8)}
+        />
       </Section>
     </div>
   )

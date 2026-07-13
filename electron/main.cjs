@@ -837,9 +837,10 @@ ipcMain.handle('promotion:apply', (_e, promotedIds = []) => {
     if (!next) continue
 
     if (next.graduated) {
-      // Απόφοιτος -> Διαγραφές (soft delete, όπως students:delete).
+      // Απόφοιτος -> Διαγραφές (soft delete). Σημειώνεται ως «Αποφοίτηση» ώστε να ΜΗΝ προσμετράται
+      // στη σχολική διαρροή (Παρατηρητήριο Γ) — δεν είναι διακοπή φοίτησης.
       db.run(
-        `UPDATE students SET prev_status=status, status='deleted', deleted_at=$now, updated_at=$now WHERE id=$id`,
+        `UPDATE students SET prev_status=status, status='deleted', deleted_at=$now, deletion_reason='Αποφοίτηση', updated_at=$now WHERE id=$id`,
         { $now: now, $id: id }
       )
       graduated++
@@ -1412,11 +1413,6 @@ ipcMain.handle('stats:observatory', (_e, period) => {
   const schoolMap = new Map() // key -> { name, type, total }
   const deleted = [] // όσοι εγγράφηκαν στην περίοδο αλλά έχουν πλέον διαγραφεί
   let total = 0
-  let dyep = 0
-  let withTY = 0
-  let withoutTY = 0
-  let eidiki = 0
-  let asynodeftoi = 0
 
   for (const s of rows) {
     total++
@@ -1439,15 +1435,45 @@ ipcMain.handle('stats:observatory', (_e, period) => {
       })
     }
     schoolMap.get(key).total += 1
+  }
 
-    // Α1.2/1.3/1.4 — ανεξάρτητα flags σχολείου (μπορεί να επικαλύπτονται).
+  // Α1.2–1.4, Α1.5, Α3.1 — ΤΡΕΧΟΥΣΑ ΕΙΚΟΝΑ: από τους ΕΝΕΡΓΟΥΣ (εγγεγραμμένους) μαθητές,
+  // ανεξάρτητα από την επιλεγμένη περίοδο.
+  const activeRows = db.query(
+    `SELECT s.asynodeftos, s.eidiki_agogi, sc.dyep AS school_dyep, sc.ty AS school_ty
+       FROM students s LEFT JOIN schools sc ON sc.id = s.school_id
+      WHERE s.status = 'enrolled'`
+  )
+  let dyep = 0
+  let withTY = 0
+  let withoutTY = 0
+  let eidiki = 0
+  let asynodeftoi = 0
+  for (const s of activeRows) {
     if (s.school_dyep) dyep++
     if (s.school_ty) withTY++
     else withoutTY++
-
     if (s.eidiki_agogi === 'Ναι') eidiki++
     if (s.asynodeftos === 'Ναι') asynodeftoi++
   }
+
+  // Γ — Ζητήματα σχολικής διαρροής: μαθητές που ΔΙΕΚΟΨΑΝ τη φοίτηση μέσα στην περίοδο
+  // (διαγράφηκαν στο 15νθήμερο ενώ ήταν εγγεγραμμένοι), ΕΚΤΟΣ των αποφοίτων. Ομαδοποίηση ανά λόγο.
+  const dropRows = db.query(
+    `SELECT deletion_reason FROM students
+      WHERE status='deleted' AND prev_status='enrolled'
+        AND deleted_at >= $start AND deleted_at < $end
+        AND (deletion_reason IS NULL OR deletion_reason != 'Αποφοίτηση')`,
+    { $start: startIso, $end: endIso }
+  )
+  const reasonMap = new Map()
+  for (const r of dropRows) {
+    const reason = (r.deletion_reason && r.deletion_reason.trim()) || 'Χωρίς καταγεγραμμένο λόγο'
+    reasonMap.set(reason, (reasonMap.get(reason) || 0) + 1)
+  }
+  const dropoutReasons = [...reasonMap.entries()]
+    .sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0], 'el'))
+    .map(([reason, count]) => ({ reason, count }))
 
   const byLevel = ['Πρωτοβάθμια', 'Δευτεροβάθμια'].map((lv) => ({ level: lv, total: levelTotals[lv] }))
 
@@ -1477,6 +1503,9 @@ ipcMain.handle('stats:observatory', (_e, period) => {
     deleted,
     deletedTotal: deleted.length,
     activeTotal: total - deleted.length,
+    activeEnrolled: activeRows.length,
+    dropoutTotal: dropRows.length,
+    dropoutReasons,
   }
 })
 
