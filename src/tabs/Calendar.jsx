@@ -5,7 +5,7 @@ import {
   MONTHS, DOW_SHORT, DOW_FULL, toKey, keyToDMY, monthGrid, weekDays,
   addDays, addMonths, sameDay,
 } from '../calendarUtils'
-import { ChevronLeft, ChevronRight, Plus, Pencil, Trash2, Check, X, CalendarDays } from 'lucide-react'
+import { ChevronLeft, ChevronRight, ChevronDown, Plus, Pencil, Trash2, Check, X, CalendarDays } from 'lucide-react'
 
 // Ρυθμίσεις εμφάνισης ανά είδος γεγονότος. Τα γεγονότα μαθητών (arrival/enrollment/deletion)
 // έχουν `field`: την πραγματική στήλη που αλλάζει η επεξεργασία ημερομηνίας.
@@ -21,6 +21,35 @@ const VIEWS = [
   { id: 'week', label: 'Εβδομάδα' },
   { id: 'day', label: 'Ημέρα' },
 ]
+
+// Είδη αυτόματων γεγονότων μαθητών (ομαδοποιούνται· οι σημειώσεις μένουν χωριστά).
+const AUTO_KINDS = ['arrival', 'enrollment', 'deletion']
+
+function pluralMathites(n) {
+  return `${n} ${n === 1 ? 'μαθητής' : 'μαθητές'}`
+}
+
+// Διαχωρισμός των γεγονότων μιας ημέρας: σημειώσεις χωριστά, γεγονότα μαθητών ανά είδος.
+function groupDay(events) {
+  const notes = []
+  const groups = {}
+  for (const e of events) {
+    if (e.kind === 'note') notes.push(e)
+    else (groups[e.kind] = groups[e.kind] || []).push(e)
+  }
+  return { notes, groups }
+}
+
+// Συνοπτικά «chips» μιας ημέρας: μία σύνοψη ανά ομάδα μαθητών (π.χ. «Άφιξη 30») + οι σημειώσεις.
+function daySummary(events) {
+  const { notes, groups } = groupDay(events)
+  const items = []
+  for (const k of AUTO_KINDS) {
+    if (groups[k]) items.push({ kind: k, label: `${KIND[k].label} ${groups[k].length}` })
+  }
+  for (const n of notes) items.push({ kind: 'note', label: n.title || 'Σημείωση' })
+  return items
+}
 
 export default function Calendar({ version, bump }) {
   const [view, setView] = useState('month')
@@ -160,12 +189,12 @@ export default function Calendar({ version, bump }) {
   )
 }
 
-// Χρωματιστό chip γεγονότος (+ κόκκινη βούλα αφήνεται στο κελί).
-function EventChip({ ev }) {
-  const k = KIND[ev.kind]
+// Χρωματιστό chip σύνοψης ημέρας (ομάδα μαθητών «Άφιξη 30» ή τίτλος σημείωσης).
+function SummaryChip({ item }) {
+  const k = KIND[item.kind]
   return (
-    <div className={`truncate rounded px-1.5 py-0.5 text-xs ring-1 ${k.chip}`} title={`${k.label}: ${ev.title}`}>
-      {ev.title || k.label}
+    <div className={`truncate rounded px-1.5 py-0.5 text-xs ring-1 ${k.chip}`} title={item.label}>
+      {item.label}
     </div>
   )
 }
@@ -189,6 +218,7 @@ function MonthView({ cursor, today, byDay, onDayClick }) {
         {grid.map((d, i) => {
           const key = toKey(d)
           const evs = byDay[key] || []
+          const summary = daySummary(evs)
           const inMonth = d.getMonth() === month
           const isToday = sameDay(d, today)
           return (
@@ -210,11 +240,11 @@ function MonthView({ cursor, today, byDay, onDayClick }) {
                 {evs.length > 0 && <RedDot />}
               </div>
               <div className="space-y-0.5">
-                {evs.slice(0, 3).map((e, j) => (
-                  <EventChip key={j} ev={e} />
+                {summary.slice(0, 3).map((it, j) => (
+                  <SummaryChip key={j} item={it} />
                 ))}
-                {evs.length > 3 && (
-                  <div className="px-1 text-xs text-slate-400">+{evs.length - 3} ακόμη</div>
+                {summary.length > 3 && (
+                  <div className="px-1 text-xs text-slate-400">+{summary.length - 3} ακόμη</div>
                 )}
               </div>
             </button>
@@ -232,6 +262,7 @@ function WeekView({ cursor, today, byDay, onDayClick }) {
       {days.map((d, i) => {
         const key = toKey(d)
         const evs = byDay[key] || []
+        const summary = daySummary(evs)
         const isToday = sameDay(d, today)
         return (
           <button
@@ -250,9 +281,9 @@ function WeekView({ cursor, today, byDay, onDayClick }) {
               </span>
             </div>
             <div className="space-y-1">
-              {evs.length === 0 && <div className="text-xs text-slate-300">—</div>}
-              {evs.map((e, j) => (
-                <EventChip key={j} ev={e} />
+              {summary.length === 0 && <div className="text-xs text-slate-300">—</div>}
+              {summary.map((it, j) => (
+                <SummaryChip key={j} item={it} />
               ))}
             </div>
           </button>
@@ -263,18 +294,24 @@ function WeekView({ cursor, today, byDay, onDayClick }) {
 }
 
 function DayView({ dayKey, events, onOpen }) {
+  const { notes, groups } = groupDay(events)
   return (
     <div className="rounded-lg border border-slate-200 bg-white p-4">
       {events.length === 0 ? (
         <div className="py-10 text-center text-slate-400">Κανένα γεγονός αυτή την ημέρα.</div>
       ) : (
         <ul className="space-y-2">
-          {events.map((e, i) => (
-            <li key={i} className="flex items-center gap-2">
-              <span className={`rounded px-1.5 py-0.5 text-xs ring-1 ${KIND[e.kind].chip}`}>{KIND[e.kind].label}</span>
+          {AUTO_KINDS.filter((k) => groups[k]).map((k) => (
+            <li key={k} className="flex items-center gap-2">
+              <span className={`rounded px-1.5 py-0.5 text-xs ring-1 ${KIND[k].chip}`}>{KIND[k].label}</span>
+              <span className="text-sm text-slate-700">{pluralMathites(groups[k].length)}</span>
+            </li>
+          ))}
+          {notes.map((e, i) => (
+            <li key={`n${i}`} className="flex items-center gap-2">
+              <span className={`rounded px-1.5 py-0.5 text-xs ring-1 ${KIND.note.chip}`}>{KIND.note.label}</span>
               <span className="text-sm text-slate-700">{e.title}</span>
-              {e.school ? <span className="text-xs text-slate-400">→ {e.school}</span> : null}
-              {e.kind === 'note' && e.note ? <span className="text-xs text-slate-400">— {e.note}</span> : null}
+              {e.note ? <span className="text-xs text-slate-400">— {e.note}</span> : null}
             </li>
           ))}
         </ul>
@@ -286,10 +323,14 @@ function DayView({ dayKey, events, onOpen }) {
   )
 }
 
-// Πλαίσιο ημέρας: λίστα γεγονότων με επεξεργασία σημειώσεων και ημερομηνίας αυτόματων γεγονότων.
+// Πλαίσιο ημέρας: σημειώσεις (επεξεργάσιμες) + ομαδοποιημένα γεγονότα μαθητών με ανάπτυξη
+// (drill-down σε ονόματα & ΔΙΚΑ, με δυνατότητα αλλαγής ημερομηνίας ανά μαθητή).
 function DayPanel({ dayKey, events, onClose, onAddNote, onEditNote, onSaveAutoDate }) {
   const [editId, setEditId] = useState(null) // studentId+kind key του γεγονότος υπό επεξεργασία
   const [draft, setDraft] = useState('')
+  const [open, setOpen] = useState({}) // kind -> αν είναι ανοιχτή η ομάδα
+
+  const { notes, groups } = groupDay(events)
 
   function beginAuto(ev) {
     setEditId(`${ev.kind}:${ev.studentId}`)
@@ -298,6 +339,9 @@ function DayPanel({ dayKey, events, onClose, onAddNote, onEditNote, onSaveAutoDa
   async function commitAuto(ev) {
     setEditId(null)
     if (draft && draft !== ev.date) await onSaveAutoDate(ev, draft)
+  }
+  function toggleGroup(k) {
+    setOpen((p) => ({ ...p, [k]: !p[k] }))
   }
 
   const footer = (
@@ -312,45 +356,72 @@ function DayPanel({ dayKey, events, onClose, onAddNote, onEditNote, onSaveAutoDa
         <div className="py-6 text-center text-slate-400">Κανένα γεγονός. Πρόσθεσε μια σημείωση.</div>
       ) : (
         <ul className="space-y-2">
-          {events.map((e, i) => {
-            const isEditing = e.kind !== 'note' && editId === `${e.kind}:${e.studentId}`
-            return (
-              <li key={i} className="flex items-center gap-2 rounded-md border border-slate-100 px-2 py-1.5">
-                <span className={`shrink-0 rounded px-1.5 py-0.5 text-xs ring-1 ${KIND[e.kind].chip}`}>{KIND[e.kind].label}</span>
-                <div className="min-w-0 flex-1">
-                  <div className="truncate text-sm text-slate-700">{e.title}</div>
-                  {e.kind === 'note' && e.note ? <div className="truncate text-xs text-slate-400">{e.note}</div> : null}
-                  {e.school ? <div className="truncate text-xs text-slate-400">→ {e.school}</div> : null}
-                </div>
+          {/* Ομάδες μαθητών (άφιξη/εγγραφή/διαγραφή) — αναπτυσσόμενες */}
+          {AUTO_KINDS.filter((k) => groups[k]).map((k) => (
+            <li key={k} className="overflow-hidden rounded-md border border-slate-100">
+              <button
+                onClick={() => toggleGroup(k)}
+                className="flex w-full items-center gap-2 bg-slate-50 px-2 py-1.5 text-left hover:bg-slate-100"
+              >
+                {open[k] ? <ChevronDown size={15} className="text-slate-400" /> : <ChevronRight size={15} className="text-slate-400" />}
+                <span className={`shrink-0 rounded px-1.5 py-0.5 text-xs ring-1 ${KIND[k].chip}`}>{KIND[k].label}</span>
+                <span className="text-sm font-medium text-slate-700">{pluralMathites(groups[k].length)}</span>
+              </button>
 
-                {isEditing ? (
-                  <div className="flex items-center gap-1">
-                    <input
-                      type="date"
-                      value={draft}
-                      onChange={(ev) => setDraft(ev.target.value)}
-                      autoFocus
-                      className="rounded border border-blue-400 px-1.5 py-0.5 text-sm"
-                    />
-                    <button onClick={() => commitAuto(e)} title="Αποθήκευση" className="rounded border border-green-200 p-1 text-green-700 hover:bg-green-50">
-                      <Check size={14} />
-                    </button>
-                    <button onClick={() => setEditId(null)} title="Άκυρο" className="rounded border border-slate-200 p-1 text-slate-500 hover:bg-slate-50">
-                      <X size={14} />
-                    </button>
-                  </div>
-                ) : e.kind === 'note' ? (
-                  <button onClick={() => onEditNote(e)} title="Επεξεργασία σημείωσης" className="rounded p-1 text-slate-400 hover:bg-slate-100 hover:text-blue-600">
-                    <Pencil size={14} />
-                  </button>
-                ) : (
-                  <button onClick={() => beginAuto(e)} title="Αλλαγή ημερομηνίας" className="rounded p-1 text-slate-400 hover:bg-slate-100 hover:text-blue-600">
-                    <Pencil size={14} />
-                  </button>
-                )}
-              </li>
-            )
-          })}
+              {open[k] && (
+                <ul className="divide-y divide-slate-100">
+                  {groups[k].map((e) => {
+                    const isEditing = editId === `${e.kind}:${e.studentId}`
+                    return (
+                      <li key={e.studentId} className="flex items-center gap-2 px-2 py-1.5">
+                        <div className="min-w-0 flex-1">
+                          <div className="truncate text-sm text-slate-700">{e.title}</div>
+                          <div className="truncate text-xs text-slate-400">
+                            ΔΙΚΑ: {e.dika || '—'}{e.school ? ` · ${e.school}` : ''}
+                          </div>
+                        </div>
+                        {isEditing ? (
+                          <div className="flex items-center gap-1">
+                            <input
+                              type="date"
+                              value={draft}
+                              onChange={(ev) => setDraft(ev.target.value)}
+                              autoFocus
+                              className="rounded border border-blue-400 px-1.5 py-0.5 text-sm"
+                            />
+                            <button onClick={() => commitAuto(e)} title="Αποθήκευση" className="rounded border border-green-200 p-1 text-green-700 hover:bg-green-50">
+                              <Check size={14} />
+                            </button>
+                            <button onClick={() => setEditId(null)} title="Άκυρο" className="rounded border border-slate-200 p-1 text-slate-500 hover:bg-slate-50">
+                              <X size={14} />
+                            </button>
+                          </div>
+                        ) : (
+                          <button onClick={() => beginAuto(e)} title="Αλλαγή ημερομηνίας" className="rounded p-1 text-slate-400 hover:bg-slate-100 hover:text-blue-600">
+                            <Pencil size={14} />
+                          </button>
+                        )}
+                      </li>
+                    )
+                  })}
+                </ul>
+              )}
+            </li>
+          ))}
+
+          {/* Χειροκίνητες σημειώσεις — ατομικά (επεξεργασία/μετακίνηση/διαγραφή στο modal) */}
+          {notes.map((e, i) => (
+            <li key={`n${i}`} className="flex items-center gap-2 rounded-md border border-slate-100 px-2 py-1.5">
+              <span className={`shrink-0 rounded px-1.5 py-0.5 text-xs ring-1 ${KIND.note.chip}`}>{KIND.note.label}</span>
+              <div className="min-w-0 flex-1">
+                <div className="truncate text-sm text-slate-700">{e.title}</div>
+                {e.note ? <div className="truncate text-xs text-slate-400">{e.note}</div> : null}
+              </div>
+              <button onClick={() => onEditNote(e)} title="Επεξεργασία σημείωσης" className="rounded p-1 text-slate-400 hover:bg-slate-100 hover:text-blue-600">
+                <Pencil size={14} />
+              </button>
+            </li>
+          ))}
         </ul>
       )}
     </Modal>

@@ -1,6 +1,10 @@
 import { useEffect, useState } from 'react'
+import {
+  Document, Packer, Paragraph, TextRun, HeadingLevel,
+  Table, TableRow, TableCell, WidthType, AlignmentType, BorderStyle,
+} from 'docx'
 import api from '../api'
-import { BarChart3, Layers, School } from 'lucide-react'
+import { BarChart3, Layers, School, Download } from 'lucide-react'
 
 const MONTHS = [
   'Ιανουάριος', 'Φεβρουάριος', 'Μάρτιος', 'Απρίλιος', 'Μάιος', 'Ιούνιος',
@@ -12,15 +16,129 @@ function Num({ n }) {
   return <span className={n ? 'text-slate-700' : 'text-slate-300'}>{n}</span>
 }
 
+// ---- Παραγωγή .docx (τακτοποιημένοι πίνακες) ------------------------------
+const LEFT = AlignmentType.LEFT
+const RIGHT = AlignmentType.RIGHT
+const B = { style: BorderStyle.SINGLE, size: 4, color: '94a3b8' }
+const CELL_BORDERS = { top: B, bottom: B, left: B, right: B }
+
+function cell(text, { b = false, a = LEFT, fill } = {}) {
+  return new TableCell({
+    borders: CELL_BORDERS,
+    shading: fill ? { fill } : undefined,
+    margins: { top: 40, bottom: 40, left: 90, right: 90 },
+    children: [new Paragraph({ alignment: a, children: [new TextRun({ text: String(text ?? ''), bold: b })] })],
+  })
+}
+
+function headerRow(labels) {
+  return new TableRow({
+    tableHeader: true,
+    children: labels.map((l, i) => cell(l, { b: true, a: i < 2 ? LEFT : RIGHT, fill: 'e2e8f0' })),
+  })
+}
+
+function makeTable(rows) {
+  return new Table({ width: { size: 100, type: WidthType.PERCENTAGE }, rows })
+}
+
+function spacer() {
+  return new Paragraph({ children: [new TextRun('')] })
+}
+
+function buildDocx(data) {
+  const t = data.totals
+  const children = []
+
+  children.push(new Paragraph({ heading: HeadingLevel.HEADING_1, children: [new TextRun('Αποτύπωση μαθητικού πληθυσμού')] }))
+  children.push(new Paragraph({ children: [new TextRun({ text: data.period, italics: true, color: '64748b' })] }))
+  children.push(spacer())
+
+  // Σύνολα
+  children.push(new Paragraph({ heading: HeadingLevel.HEADING_2, children: [new TextRun('Σύνολα')] }))
+  children.push(makeTable([
+    headerRow(['Σύνολο μαθητών', 'Άρρενες', 'Θήλεις']),
+    new TableRow({ children: [
+      cell(t.total, { b: true }),
+      cell(t.male, { a: RIGHT }),
+      cell(t.female, { a: RIGHT }),
+    ] }),
+  ]))
+  children.push(spacer())
+
+  // Ανά βαθμίδα
+  children.push(new Paragraph({ heading: HeadingLevel.HEADING_2, children: [new TextRun('Μαθητές ανά βαθμίδα')] }))
+  const levelRows = [headerRow(['Βαθμίδα', 'Τύπος', 'Άρρενες', 'Θήλεις', 'Σύνολο'])]
+  for (const lv of data.byLevel) {
+    lv.categories.forEach((c, i) => {
+      levelRows.push(new TableRow({ children: [
+        cell(i === 0 ? lv.level : '', { b: true }),
+        cell(c.category),
+        cell(c.male, { a: RIGHT }),
+        cell(c.female, { a: RIGHT }),
+        cell(c.total, { a: RIGHT, b: true }),
+      ] }))
+    })
+    levelRows.push(new TableRow({ children: [
+      cell(''),
+      cell(`Υποσύνολο ${lv.level}`, { b: true, fill: 'f1f5f9' }),
+      cell(lv.male, { a: RIGHT, b: true, fill: 'f1f5f9' }),
+      cell(lv.female, { a: RIGHT, b: true, fill: 'f1f5f9' }),
+      cell(lv.total, { a: RIGHT, b: true, fill: 'f1f5f9' }),
+    ] }))
+  }
+  levelRows.push(new TableRow({ children: [
+    cell('Γενικό σύνολο', { b: true, fill: 'dbeafe' }),
+    cell('', { fill: 'dbeafe' }),
+    cell(t.male, { a: RIGHT, b: true, fill: 'dbeafe' }),
+    cell(t.female, { a: RIGHT, b: true, fill: 'dbeafe' }),
+    cell(t.total, { a: RIGHT, b: true, fill: 'dbeafe' }),
+  ] }))
+  children.push(makeTable(levelRows))
+  children.push(spacer())
+
+  // Ανά σχολείο & φύλο
+  children.push(new Paragraph({ heading: HeadingLevel.HEADING_2, children: [new TextRun('Μαθητές ανά σχολείο & φύλο')] }))
+  const schoolRows = [headerRow(['Σχολείο', 'Τύπος', 'Άρρενες', 'Θήλεις', 'Σύνολο'])]
+  for (const s of data.bySchool) {
+    schoolRows.push(new TableRow({ children: [
+      cell(s.name, { b: true }),
+      cell(s.type || '—'),
+      cell(s.male, { a: RIGHT }),
+      cell(s.female, { a: RIGHT }),
+      cell(s.total, { a: RIGHT, b: true }),
+    ] }))
+  }
+  children.push(makeTable(schoolRows))
+
+  return new Document({
+    styles: { default: { document: { run: { font: 'Calibri', size: 22 } } } },
+    sections: [{ children }],
+  })
+}
+
 export default function Report({ version }) {
   const now = new Date()
   const [month, setMonth] = useState(now.getMonth() + 1)
   const [year, setYear] = useState(now.getFullYear())
   const [data, setData] = useState(null)
+  const [busy, setBusy] = useState(false)
 
   useEffect(() => {
     api.monthlyStats({ year, month }).then(setData)
   }, [year, month, version])
+
+  async function exportDocx() {
+    if (!data || busy) return
+    setBusy(true)
+    try {
+      const blob = await Packer.toBlob(buildDocx(data))
+      const buf = await blob.arrayBuffer()
+      await api.saveReportDocx(buf, `Αποτύπωση ${MONTHS[month - 1]} ${year}.docx`)
+    } finally {
+      setBusy(false)
+    }
+  }
 
   if (!data) return null
 
@@ -36,7 +154,15 @@ export default function Report({ version }) {
           <BarChart3 size={20} className="text-blue-600" />
           <h3 className="font-semibold text-slate-700">Αποτύπωση μήνα</h3>
         </div>
-        <div className="ml-auto flex items-end gap-2">
+        <div className="ml-auto flex flex-wrap items-end gap-2">
+          <button
+            onClick={exportDocx}
+            disabled={busy}
+            title="Εξαγωγή της αποτύπωσης σε αρχείο Word (.docx)"
+            className="inline-flex items-center gap-1.5 rounded-md bg-emerald-600 px-3 py-2 text-sm font-medium text-white hover:bg-emerald-700 disabled:opacity-40"
+          >
+            <Download size={16} /> {busy ? 'Εξαγωγή…' : 'Εξαγωγή σε doc'}
+          </button>
           <div>
             <label className="mb-1 block text-xs text-slate-500">Μήνας</label>
             <select

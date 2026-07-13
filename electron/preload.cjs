@@ -6,6 +6,7 @@ const { contextBridge, ipcRenderer } = require('electron')
 contextBridge.exposeInMainWorld('api', {
   importXlsx: () => ipcRenderer.invoke('import:xlsx'),
   importPdf: () => ipcRenderer.invoke('import:pdf'),
+  lastImport: () => ipcRenderer.invoke('import:lastBatch'),
   addManualStudent: (fields) => ipcRenderer.invoke('students:addManual', fields),
   resetAllData: () => ipcRenderer.invoke('data:reset'),
 
@@ -61,6 +62,8 @@ contextBridge.exposeInMainWorld('api', {
 
   monthlyStats: (period) => ipcRenderer.invoke('stats:monthly', period),
   observatoryStats: (period) => ipcRenderer.invoke('stats:observatory', period),
+  saveReportDocx: (data, defaultName) =>
+    ipcRenderer.invoke('report:saveDocx', { data, defaultName }),
 
   calendarEvents: (range) => ipcRenderer.invoke('calendar:events', range),
   addCalendarNote: (payload) => ipcRenderer.invoke('calendar:addNote', payload),

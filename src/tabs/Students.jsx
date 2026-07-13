@@ -7,6 +7,7 @@ import BulkDeleteByDikaModal from '../components/BulkDeleteByDikaModal'
 import DeleteReasonModal from '../components/DeleteReasonModal'
 import SchoolCell from '../components/SchoolCell'
 import GradeCell from '../components/GradeCell'
+import LastImportBadge from '../components/LastImportBadge'
 import { useSelection } from '../useSelection'
 import { birthSortValue } from '../sort'
 import { isoToDMY } from '../calendarUtils'
@@ -122,7 +123,10 @@ export default function Students({ version, bump }) {
   return (
     <div>
       <div className="mb-3 flex items-center justify-between gap-3">
-        <span className="text-sm text-slate-500">{students.length} εγγεγραμμένοι μαθητές</span>
+        <div className="flex flex-wrap items-center gap-x-3 gap-y-1">
+          <span className="text-sm text-slate-500">{students.length} εγγεγραμμένοι μαθητές</span>
+          <LastImportBadge version={version} />
+        </div>
         <button
           onClick={() => setDikaDelete(true)}
           className="inline-flex items-center gap-1.5 rounded-md border border-red-300 px-3 py-1.5 text-sm font-medium text-red-600 hover:bg-red-50"

@@ -28,7 +28,21 @@ function buildA1Text(data) {
       }`
     )
   }
-  lines.push(`Σύνολο: ${data.total}`)
+  lines.push(`Σύνολο εγγραφών: ${data.total}`)
+
+  // Στο ΙΔΙΟ μπλοκ: οι διαγραφές της περιόδου (όσοι εγγράφηκαν στην περίοδο αλλά έχουν πλέον διαγραφεί).
+  lines.push('')
+  lines.push(`Διαγραφές περιόδου: ${data.deletedTotal}`)
+  for (const d of data.deleted || []) {
+    const parts = [d.name || '—']
+    if (d.dika) parts.push(`ΔΙΚΑ ${d.dika}`)
+    if (d.school) parts.push(d.school)
+    lines.push(`• ${parts.join(' — ')}`)
+  }
+
+  // Και στο τέλος το τελικό σύνολο (ενεργοί = εγγραφές − διαγραφές).
+  lines.push('')
+  lines.push(`Τελικό σύνολο (ενεργοί): ${data.activeTotal}`)
   return lines.join('\n')
 }
 
@@ -145,9 +159,14 @@ export default function Observatory({ version }) {
         επεξεργάσιμο· το κουμπί αντιγράφει ολόκληρο το κείμενο για επικόλληση στη φόρμα του Παρατηρητηρίου.
       </p>
 
-      {/* Α1 — εγγραφές ανά βαθμίδα & σχολείο */}
-      <Section icon={Layers} title="Α1 — Εγγραφές">
-        <FieldText label="Α1 — Εγγραφές ανά βαθμίδα & σχολείο" value={vals.a1} onChange={set('a1')} rows={6} />
+      {/* Α1 — εγγραφές + διαγραφές + τελικό σύνολο (ένα ενιαίο μπλοκ) */}
+      <Section icon={Layers} title="Α1 — Εγγραφές & Διαγραφές">
+        <FieldText
+          label="Α1 — Εγγραφές ανά βαθμίδα & σχολείο, διαγραφές περιόδου & τελικό σύνολο"
+          value={vals.a1}
+          onChange={set('a1')}
+          rows={Math.min(9 + (data.deletedTotal || 0), 22)}
+        />
       </Section>
 
       {/* Α1.2–1.4 — τύπος προγράμματος */}

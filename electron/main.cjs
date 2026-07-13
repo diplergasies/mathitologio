@@ -359,6 +359,32 @@ ipcMain.handle('import:pdf', async () => {
   }
 })
 
+// Στοιχεία της τελευταίας λίστας που εισήχθη (όνομα αρχείου + ημ/νία), για ένδειξη σε Αφίξεις/Μαθητές.
+ipcMain.handle('import:lastBatch', () => {
+  const rows = db.query(
+    'SELECT source_filename, imported_at FROM batches ORDER BY id DESC LIMIT 1'
+  )
+  return rows[0] || null
+})
+
+// Αποθήκευση της αποτύπωσης σε .docx. Τα bytes παράγονται στο renderer (βιβλιοθήκη docx) και
+// εδώ απλώς ανοίγει διάλογος αποθήκευσης και γράφεται το αρχείο.
+ipcMain.handle('report:saveDocx', async (_e, { data, defaultName } = {}) => {
+  if (!data) return { canceled: true }
+  const { canceled, filePath } = await dialog.showSaveDialog({
+    title: 'Αποθήκευση αποτύπωσης σε Word',
+    defaultPath: defaultName || 'apotyposi.docx',
+    filters: [{ name: 'Έγγραφο Word', extensions: ['docx'] }],
+  })
+  if (canceled || !filePath) return { canceled: true }
+  try {
+    fs.writeFileSync(filePath, Buffer.from(data))
+    return { ok: true, filePath }
+  } catch (err) {
+    return { error: `Αποτυχία αποθήκευσης: ${err && err.message ? err.message : err}` }
+  }
+})
+
 // Κοινό batch για όλες τις χειροκίνητες καταχωρήσεις ενός σχολικού έτους (ένα χρώμα/πηγή).
 function getOrCreateManualBatch(syLabel) {
   const MANUAL = 'Χειροκίνητη καταχώρηση'
@@ -629,24 +655,25 @@ ipcMain.handle('calendar:events', (_e, range = {}) => {
 
   // Γεγονότα μαθητών.
   const rows = db.query(
-    `SELECT s.id, s.eponymo, s.onoma, s.status, s.prev_status,
+    `SELECT s.id, s.eponymo, s.onoma, s.dika, s.status, s.prev_status,
             s.imerominia_afixis, s.enrolled_at, s.deleted_at, sch.name AS school_name
        FROM students s LEFT JOIN schools sch ON sch.id = s.school_id`
   )
   for (const s of rows) {
     const name = `${s.eponymo || ''} ${s.onoma || ''}`.trim()
+    const dika = s.dika || ''
     if (s.status === 'arrival' || s.status === 'enrolled') {
       // parseBirthDate κανονικοποιεί και παλαιές μη-zero-padded τιμές (π.χ. '7/5/2025').
       const key = displayToKey(importer.parseBirthDate(s.imerominia_afixis).display)
-      if (key) events.push({ kind: 'arrival', date: key, title: name, studentId: s.id })
+      if (key) events.push({ kind: 'arrival', date: key, title: name, dika, studentId: s.id })
     }
     if (s.status === 'enrolled' || s.prev_status === 'enrolled') {
       const key = isoToKey(s.enrolled_at)
-      if (key) events.push({ kind: 'enrollment', date: key, title: name, studentId: s.id, school: s.school_name || '' })
+      if (key) events.push({ kind: 'enrollment', date: key, title: name, dika, studentId: s.id, school: s.school_name || '' })
     }
     if (s.status === 'deleted') {
       const key = isoToKey(s.deleted_at)
-      if (key) events.push({ kind: 'deletion', date: key, title: name, studentId: s.id })
+      if (key) events.push({ kind: 'deletion', date: key, title: name, dika, studentId: s.id })
     }
   }
 
@@ -1371,7 +1398,7 @@ ipcMain.handle('stats:observatory', (_e, period) => {
 
   // Όσοι ΕΓΓΡΑΦΗΚΑΝ μέσα στο 15νθήμερο (ακόμη κι αν διαγράφηκαν αργότερα).
   const rows = db.query(
-    `SELECT s.fylo, s.computed_type, s.asynodeftos, s.eidiki_agogi,
+    `SELECT s.eponymo, s.onoma, s.dika, s.status, s.fylo, s.computed_type, s.asynodeftos, s.eidiki_agogi,
             sc.id AS school_id, sc.name AS school_name, sc.type AS school_type,
             sc.dyep AS school_dyep, sc.ty AS school_ty
        FROM students s LEFT JOIN schools sc ON sc.id = s.school_id
@@ -1383,6 +1410,7 @@ ipcMain.handle('stats:observatory', (_e, period) => {
 
   const levelTotals = { 'Πρωτοβάθμια': 0, 'Δευτεροβάθμια': 0, 'Άλλο': 0 }
   const schoolMap = new Map() // key -> { name, type, total }
+  const deleted = [] // όσοι εγγράφηκαν στην περίοδο αλλά έχουν πλέον διαγραφεί
   let total = 0
   let dyep = 0
   let withTY = 0
@@ -1392,6 +1420,13 @@ ipcMain.handle('stats:observatory', (_e, period) => {
 
   for (const s of rows) {
     total++
+    if (s.status === 'deleted') {
+      deleted.push({
+        name: `${s.eponymo || ''} ${s.onoma || ''}`.trim(),
+        dika: s.dika || '',
+        school: s.school_id != null ? s.school_name : '',
+      })
+    }
     const category = s.school_type || s.computed_type || 'Άλλο'
     levelTotals[levelOf(category)] += 1
 
@@ -1439,6 +1474,9 @@ ipcMain.handle('stats:observatory', (_e, period) => {
     withoutTY,
     eidiki,
     asynodeftoi,
+    deleted,
+    deletedTotal: deleted.length,
+    activeTotal: total - deleted.length,
   }
 })
 

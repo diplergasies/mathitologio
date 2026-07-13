@@ -4,6 +4,7 @@ import StudentTable from '../components/StudentTable'
 import BulkEnrollModal from '../components/BulkEnrollModal'
 import BulkDeleteByDikaModal from '../components/BulkDeleteByDikaModal'
 import ManualArrivalModal from '../components/ManualArrivalModal'
+import LastImportBadge from '../components/LastImportBadge'
 import { useSelection } from '../useSelection'
 import { birthSortValue, proposedSortValue } from '../sort'
 import { GraduationCap, Trash2, Users, Hash, UserPlus } from 'lucide-react'
@@ -67,7 +68,10 @@ export default function Arrivals({ version, bump }) {
   return (
     <div>
       <div className="mb-3 flex items-center justify-between gap-3">
-        <span className="text-sm text-slate-500">{students.length} αφίξεις προς εγγραφή</span>
+        <div className="flex flex-wrap items-center gap-x-3 gap-y-1">
+          <span className="text-sm text-slate-500">{students.length} αφίξεις προς εγγραφή</span>
+          <LastImportBadge version={version} />
+        </div>
         <div className="flex items-center gap-2">
           <button
             onClick={() => setManual(true)}
