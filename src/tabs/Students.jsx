@@ -54,6 +54,7 @@ export default function Students({ version, bump }) {
     { key: 'monada', label: 'Μονάδα', editable: true },
     { key: 'dika', label: 'ΔΙΚΑ', editable: true },
     { key: 'fylo', label: 'Φύλο', editable: true },
+    { key: 'ithageneia', label: 'Ιθαγένεια', editable: true },
     { key: 'imerominia_gennisis', label: 'Ημ. γέννησης', sortable: true, sortAccessor: birthSortValue, editable: true },
     {
       key: 'school_name',
