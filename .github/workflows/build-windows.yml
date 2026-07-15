@@ -54,15 +54,10 @@ jobs:
         # --publish never: μόνο build, χωρίς auto-publish (το release το κάνει το επόμενο βήμα σε tag).
         run: npm run build && npx electron-builder --win --publish never
 
-      - name: Upload installer artifact
-        # Μη-μπλοκαριστικό: αν γεμίσει το artifact storage quota, να ΜΗΝ αποτυγχάνει το job —
-        # το installer δημοσιεύεται ούτως ή άλλως ως release asset (ξεχωριστή αποθήκευση).
-        continue-on-error: true
-        uses: actions/upload-artifact@v4
-        with:
-          name: Mathitologio-Windows-Installer
-          path: release/*.exe
-          if-no-files-found: error
+      # ΣΗΜ.: Δεν ανεβάζουμε πλέον το installer ως Actions artifact.
+      # Ήταν 100% περιττό (~310 MB/build) και γέμιζε το δωρεάν artifact quota (500 MB):
+      # το installer αποθηκεύεται ήδη ως GitHub Release asset ΚΑΙ στο Google Drive.
+      # Αν χρειαστεί ξανά (π.χ. debug build χωρίς tag), βάλε upload-artifact με retention-days: 1.
 
       # Σε tag (π.χ. v0.1.0) δημιουργεί GitHub Release με συνημμένο το installer.
       - name: Create GitHub Release
