@@ -10,8 +10,13 @@ name: Build Windows installer (Πειραματικό — private artifact)
 # ΣΗΜ. quota: το artifact είναι ~300 MB. Κατέβασέ το και ΔΙΕΓΡΑΨΕ το run/artifact μετά,
 # ώστε να μη γεμίζει το δωρεάν artifact quota (500 MB).
 
+# Τρέχει χειροκίνητα (αν το workflow υπάρχει και στον default branch) ΚΑΙ αυτόματα σε κάθε
+# push στον κλάδο `experimental` — έτσι κάθε ενημέρωση του πειραματικού παράγει νέο installer.
 on:
   workflow_dispatch:
+  push:
+    branches:
+      - experimental
 
 permissions:
   contents: read
