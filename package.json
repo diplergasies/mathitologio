@@ -1,6 +1,6 @@
 {
   "name": "mathitologio",
-  "productName": "Μαθητολόγιο",
+  "productName": "Μαθητολόγιο (Πειραματικό)",
   "version": "1.6.3",
   "description": "Ψηφιακό Μαθητολόγιο — διαχείριση μαθητικού πληθυσμού δομής φιλοξενίας",
   "author": "Κατσιαντρίδης Χρήστος",
@@ -18,7 +18,9 @@
   },
   "dependencies": {
     "docx": "^9.7.1",
+    "imapflow": "^1.4.7",
     "lucide-react": "^0.546.0",
+    "mailparser": "^3.9.14",
     "pdf2json": "^4.0.3",
     "pizzip": "^3.1.7",
     "react": "^19.0.0",
@@ -40,8 +42,8 @@
     "wait-on": "^8.0.1"
   },
   "build": {
-    "appId": "gr.altosweb.mathitologio",
-    "productName": "Μαθητολόγιο ΣΕΠ",
+    "appId": "gr.altosweb.mathitologio.exp",
+    "productName": "Μαθητολόγιο ΣΕΠ (Πειραματικό)",
     "directories": {
       "output": "release",
       "buildResources": "build"
@@ -78,7 +80,7 @@
           ]
         }
       ],
-      "artifactName": "Mathitologio-Setup-${version}.${ext}"
+      "artifactName": "Mathitologio-EXP-Setup-${version}.${ext}"
     },
     "nsis": {
       "oneClick": false,
@@ -86,7 +88,7 @@
       "allowToChangeInstallationDirectory": true,
       "createDesktopShortcut": true,
       "createStartMenuShortcut": true,
-      "shortcutName": "Μαθητολόγιο ΣΕΠ"
+      "shortcutName": "Μαθητολόγιο ΣΕΠ (Πειραματικό)"
     }
   }
 }

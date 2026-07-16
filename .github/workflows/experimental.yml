@@ -1,0 +1,65 @@
+name: Build Windows installer (Πειραματικό — private artifact)
+
+# Ιδιωτικό build ΜΟΝΟ για τον προγραμματιστή: χτίζει το πειραματικό .exe και το ανεβάζει
+# ΑΠΟΚΛΕΙΣΤΙΚΑ ως GitHub artifact (κατέβασμα από την καρτέλα Actions → run → Artifacts).
+# ΔΕΝ δημιουργεί Release και ΔΕΝ ανεβάζει στο Google Drive.
+#
+# Τρέχει μόνο χειροκίνητα: Actions → «Build Windows installer (Πειραματικό …)» → Run workflow,
+# διαλέγοντας τον κλάδο (branch) `experimental`.
+#
+# ΣΗΜ. quota: το artifact είναι ~300 MB. Κατέβασέ το και ΔΙΕΓΡΑΨΕ το run/artifact μετά,
+# ώστε να μη γεμίζει το δωρεάν artifact quota (500 MB).
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: windows-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Bundle LibreOffice (για pptx/docx → PDF χωρίς εγκατεστημένο Office)
+        shell: pwsh
+        run: |
+          $installed = $false
+          for ($i = 1; $i -le 6; $i++) {
+            Write-Host "choco install libreoffice-fresh — προσπάθεια $i/6..."
+            choco install libreoffice-fresh -y --no-progress
+            if (Test-Path "C:\Program Files\LibreOffice\program\soffice.exe") { $installed = $true; break }
+            Write-Host "Αποτυχία (πιθανό προσωρινό πρόβλημα choco feed). Αναμονή 60s..."
+            Start-Sleep -Seconds 60
+          }
+          if (-not $installed) { throw "Δεν εγκαταστάθηκε το LibreOffice μετά από 6 προσπάθειες (choco feed)" }
+          $src = "C:\Program Files\LibreOffice"
+          New-Item -ItemType Directory -Force -Path resources\libreoffice | Out-Null
+          Copy-Item "$src\*" resources\libreoffice\ -Recurse -Force
+          foreach ($d in @("help","readmes")) {
+            Remove-Item "resources\libreoffice\$d" -Recurse -Force -ErrorAction SilentlyContinue
+          }
+          if (!(Test-Path "resources\libreoffice\program\soffice.exe")) { throw "Αποτυχία αντιγραφής LibreOffice" }
+          Write-Host "Bundled soffice:" (Resolve-Path "resources\libreoffice\program\soffice.exe").Path
+
+      - name: Build Windows installer (.exe)
+        run: npm run build && npx electron-builder --win --publish never
+
+      - name: Upload installer as private artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: Mathitologio-EXP-installer
+          path: release/Mathitologio-EXP-Setup-*.exe
+          retention-days: 5
+          if-no-files-found: error

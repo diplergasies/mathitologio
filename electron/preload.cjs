@@ -69,4 +69,14 @@ contextBridge.exposeInMainWorld('api', {
   addCalendarNote: (payload) => ipcRenderer.invoke('calendar:addNote', payload),
   updateCalendarNote: (payload) => ipcRenderer.invoke('calendar:updateNote', payload),
   deleteCalendarNote: (id) => ipcRenderer.invoke('calendar:deleteNote', id),
+  saveCalendarDocx: (data, defaultName) =>
+    ipcRenderer.invoke('calendar:saveDocx', { data, defaultName }),
+
+  // Αυτόματη εισαγωγή λίστας από e-mail (sch.gr) — πειραματικό.
+  mailGetConfig: () => ipcRenderer.invoke('mail:getConfig'),
+  mailSetConfig: (cfg) => ipcRenderer.invoke('mail:setConfig', cfg),
+  mailTestConnection: () => ipcRenderer.invoke('mail:test'),
+  mailClearCredentials: () => ipcRenderer.invoke('mail:clearCredentials'),
+  mailCheck: () => ipcRenderer.invoke('mail:check'),
+  mailImportMessage: (id) => ipcRenderer.invoke('mail:import', id),
 })

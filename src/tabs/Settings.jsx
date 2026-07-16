@@ -3,7 +3,7 @@ import api from '../api'
 import Schools from './Schools'
 import PromotionModal from '../components/PromotionModal'
 import ResetDataModal from '../components/ResetDataModal'
-import { UserCog, Save, School, CalendarRange, GraduationCap, DatabaseBackup, FolderOpen, Play, FileText, FilePlus2, Trash2, AlertTriangle } from 'lucide-react'
+import { UserCog, Save, School, CalendarRange, GraduationCap, DatabaseBackup, FolderOpen, Play, FileText, FilePlus2, Trash2, AlertTriangle, Mail, RefreshCw, KeyRound, Search } from 'lucide-react'
 
 // Βαθμίδες με σταθερό κλειδί `type` (ίδιο με το backend) και ετικέτα εμφάνισης.
 const BAND_DEFS = [
@@ -528,7 +528,169 @@ function ResetSection({ bump }) {
   )
 }
 
-export default function Settings({ version, bump }) {
+const MAIL_FREQ = [
+  { value: 'off', label: 'Ανενεργό' },
+  { value: '15m', label: 'Κάθε 15 λεπτά' },
+  { value: '30m', label: 'Κάθε 30 λεπτά' },
+  { value: '1h', label: 'Κάθε 1 ώρα' },
+  { value: '2h', label: 'Κάθε 2 ώρες' },
+  { value: '3h', label: 'Κάθε 3 ώρες' },
+  { value: '24h', label: 'Κάθε 24 ώρες' },
+]
+
+// Πειραματικό: αυτόματη εισαγωγή λίστας πληθυσμού (ΣΕΠ) από το γραμματοκιβώτιο sch.gr.
+function EmailImportSection({ emailCheck, onEmailConfigChange }) {
+  const [host, setHost] = useState('mail.sch.gr')
+  const [port, setPort] = useState('993')
+  const [username, setUsername] = useState('')
+  const [password, setPassword] = useState('')
+  const [hasPassword, setHasPassword] = useState(false)
+  const [autoFreq, setAutoFreq] = useState('off')
+  const [encAvailable, setEncAvailable] = useState(true)
+  const [msg, setMsg] = useState(null) // { text, type }
+  const [busy, setBusy] = useState('') // '' | 'save' | 'test' | 'check' | 'clear'
+
+  function reload() {
+    api.mailGetConfig().then((c) => {
+      if (!c) return
+      setHost(c.host || 'mail.sch.gr')
+      setPort(String(c.port || 993))
+      setUsername(c.username || '')
+      setHasPassword(!!c.hasPassword)
+      setAutoFreq(c.autoFreq || 'off')
+      setEncAvailable(c.encAvailable !== false)
+      setPassword('')
+    })
+  }
+  useEffect(reload, [])
+
+  async function save() {
+    setBusy('save')
+    setMsg(null)
+    const res = await api.mailSetConfig({ host, port, username, password, autoFreq })
+    setBusy('')
+    if (res && res.error) return setMsg({ text: res.error, type: 'error' })
+    setPassword('')
+    setMsg({ text: 'Οι ρυθμίσεις e-mail αποθηκεύτηκαν.', type: 'ok' })
+    reload()
+    onEmailConfigChange && onEmailConfigChange()
+  }
+
+  async function test() {
+    setBusy('test')
+    setMsg(null)
+    // Αποθήκευση πρώτα ώστε ο έλεγχος να χρησιμοποιεί τα τρέχοντα στοιχεία.
+    await api.mailSetConfig({ host, port, username, password, autoFreq })
+    setPassword('')
+    const res = await api.mailTestConnection()
+    setBusy('')
+    reload()
+    if (res && res.ok) setMsg({ text: 'Επιτυχής σύνδεση στο γραμματοκιβώτιο ✓', type: 'ok' })
+    else setMsg({ text: (res && res.error) || 'Αποτυχία σύνδεσης.', type: 'error' })
+  }
+
+  async function checkNow() {
+    setBusy('check')
+    setMsg(null)
+    await api.mailSetConfig({ host, port, username, password, autoFreq })
+    setPassword('')
+    reload()
+    onEmailConfigChange && onEmailConfigChange()
+    if (emailCheck) await emailCheck()
+    setBusy('')
+  }
+
+  async function clearCreds() {
+    if (!confirm('Σβήσιμο αποθηκευμένων συνθηματικών και απενεργοποίηση αυτόματης εισαγωγής;')) return
+    setBusy('clear')
+    setMsg(null)
+    await api.mailClearCredentials()
+    setBusy('')
+    setMsg({ text: 'Τα συνθηματικά σβήστηκαν και η αυτόματη εισαγωγή απενεργοποιήθηκε.', type: 'ok' })
+    reload()
+    onEmailConfigChange && onEmailConfigChange()
+  }
+
+  const inputCls = 'w-full rounded-md border border-slate-300 px-3 py-2 text-sm'
+
+  return (
+    <div className="rounded-lg border border-slate-200 bg-white p-4">
+      <h3 className="mb-1 flex items-center gap-2 font-semibold text-slate-700">
+        <Mail size={18} /> Αυτόματη εισαγωγή λίστας από e-mail (sch.gr)
+        <span className="rounded bg-amber-100 px-1.5 py-0.5 text-xs font-medium text-amber-700">Πειραματικό</span>
+      </h3>
+      <p className="mb-3 text-xs text-slate-400">
+        Ελέγχει το γραμματοκιβώτιο (IMAP) για το πιο πρόσφατο e-mail με θέμα{' '}
+        <strong>«Λίστα πληθυσμού … (ΣΕΠ)»</strong> των τελευταίων 50 ημερών και προτείνει την εισαγωγή
+        του συνημμένου PDF. Ο κωδικός αποθηκεύεται <strong>κρυπτογραφημένος</strong> τοπικά. Ο έλεγχος
+        γίνεται στην εκκίνηση και με τη συχνότητα που ορίζεις.
+      </p>
+
+      {!encAvailable && (
+        <p className="mb-3 flex items-center gap-1 rounded-md bg-amber-50 px-2 py-1.5 text-xs text-amber-700">
+          <AlertTriangle size={13} /> Η κρυπτογράφηση κωδικού δεν είναι διαθέσιμη σε αυτό το σύστημα —
+          η αποθήκευση κωδικού θα αποτύχει.
+        </p>
+      )}
+
+      <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+        <div className="sm:col-span-2">
+          <label className="mb-1 block text-sm text-slate-600">Όνομα χρήστη (e-mail sch.gr)</label>
+          <input value={username} onChange={(e) => setUsername(e.target.value)} placeholder="π.χ. onoma@sch.gr" className={inputCls} />
+        </div>
+        <div className="sm:col-span-2">
+          <label className="mb-1 block text-sm text-slate-600">
+            Κωδικός {hasPassword && <span className="text-xs text-green-600">(αποθηκευμένος — άφησέ το κενό για να μη γίνει αλλαγή)</span>}
+          </label>
+          <input
+            type="password"
+            value={password}
+            onChange={(e) => setPassword(e.target.value)}
+            placeholder={hasPassword ? '●●●●●●●● (αποθηκευμένος)' : 'Κωδικός λογαριασμού'}
+            className={inputCls}
+          />
+        </div>
+        <div>
+          <label className="mb-1 block text-sm text-slate-600">Διακομιστής IMAP</label>
+          <input value={host} onChange={(e) => setHost(e.target.value)} className={inputCls} />
+        </div>
+        <div>
+          <label className="mb-1 block text-sm text-slate-600">Θύρα (SSL/TLS)</label>
+          <input value={port} onChange={(e) => setPort(e.target.value)} className={inputCls} />
+        </div>
+        <div className="sm:col-span-2">
+          <label className="mb-1 block text-sm text-slate-600">Συχνότητα αυτόματου ελέγχου</label>
+          <select value={autoFreq} onChange={(e) => setAutoFreq(e.target.value)} className="rounded-md border border-slate-300 px-3 py-2 text-sm">
+            {MAIL_FREQ.map((o) => (
+              <option key={o.value} value={o.value}>{o.label}</option>
+            ))}
+          </select>
+        </div>
+      </div>
+
+      <div className="mt-3 flex flex-wrap items-center gap-2">
+        <button onClick={save} disabled={!!busy} className="inline-flex items-center gap-1.5 rounded-md bg-blue-600 px-3 py-2 text-sm font-medium text-white hover:bg-blue-700 disabled:opacity-40">
+          <Save size={16} /> {busy === 'save' ? 'Γίνεται…' : 'Αποθήκευση'}
+        </button>
+        <button onClick={test} disabled={!!busy} className="inline-flex items-center gap-1.5 rounded-md border border-slate-300 px-3 py-2 text-sm text-slate-600 hover:bg-slate-50 disabled:opacity-40">
+          <RefreshCw size={16} /> {busy === 'test' ? 'Έλεγχος…' : 'Έλεγχος σύνδεσης'}
+        </button>
+        <button onClick={checkNow} disabled={!!busy} className="inline-flex items-center gap-1.5 rounded-md border border-slate-300 px-3 py-2 text-sm text-slate-600 hover:bg-slate-50 disabled:opacity-40">
+          <Search size={16} /> {busy === 'check' ? 'Αναζήτηση…' : 'Έλεγχος για νέα λίστα τώρα'}
+        </button>
+        <button onClick={clearCreds} disabled={!!busy} className="ml-auto inline-flex items-center gap-1.5 rounded-md border border-red-200 px-3 py-2 text-sm text-red-600 hover:bg-red-50 disabled:opacity-40">
+          <KeyRound size={16} /> Σβήσιμο συνθηματικών
+        </button>
+      </div>
+
+      {msg && (
+        <p className={`mt-2 text-sm ${msg.type === 'error' ? 'text-red-600' : 'text-green-600'}`}>{msg.text}</p>
+      )}
+    </div>
+  )
+}
+
+export default function Settings({ version, bump, emailCheck, onEmailConfigChange }) {
   const [form, setForm] = useState({ sep: '', nomos: '', domi: '', perif: '' })
   const [saved, setSaved] = useState(false)
 
@@ -599,6 +761,8 @@ export default function Settings({ version, bump }) {
       <SchoolYearSection bump={bump} />
 
       <BackupSection />
+
+      <EmailImportSection emailCheck={emailCheck} onEmailConfigChange={onEmailConfigChange} />
 
       <TemplatesSection />
 

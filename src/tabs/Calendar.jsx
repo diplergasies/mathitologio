@@ -5,7 +5,8 @@ import {
   MONTHS, DOW_SHORT, DOW_FULL, toKey, keyToDMY, monthGrid, weekDays,
   addDays, addMonths, sameDay,
 } from '../calendarUtils'
-import { ChevronLeft, ChevronRight, ChevronDown, Plus, Pencil, Trash2, Check, X, CalendarDays } from 'lucide-react'
+import { ChevronLeft, ChevronRight, ChevronDown, Plus, Pencil, Trash2, Check, X, CalendarDays, Download } from 'lucide-react'
+import { exportCalendarDocx } from '../calendarExport'
 
 // Ρυθμίσεις εμφάνισης ανά είδος γεγονότος. Τα γεγονότα μαθητών (arrival/enrollment/deletion)
 // έχουν `field`: την πραγματική στήλη που αλλάζει η επεξεργασία ημερομηνίας.
@@ -57,6 +58,7 @@ export default function Calendar({ version, bump }) {
   const [events, setEvents] = useState([])
   const [panelKey, setPanelKey] = useState(null) // 'YYYY-MM-DD' → άνοιγμα πλαισίου ημέρας
   const [noteEdit, setNoteEdit] = useState(null) // { id?, date, title, note } για το modal σημείωσης
+  const [exporting, setExporting] = useState(false)
 
   function reload() {
     api.calendarEvents().then((r) => setEvents(r || []))
@@ -114,6 +116,22 @@ export default function Calendar({ version, bump }) {
     bump()
   }
 
+  // Εξαγωγή ολόκληρου του σχολικού έτους (1 Σεπ – 31 Αυγ) σε .docx.
+  async function exportDocx() {
+    setExporting(true)
+    try {
+      const info = await api.appInfo()
+      const syStart = info && info.schoolYearStart ? Number(info.schoolYearStart) : new Date().getFullYear()
+      const syLabel = (info && info.schoolYearLabel) || `${syStart}-${syStart + 1}`
+      const res = await exportCalendarDocx({ syStart, syLabel })
+      if (res && res.error) alert(res.error)
+    } catch (err) {
+      alert(`Αποτυχία εξαγωγής: ${err && err.message ? err.message : err}`)
+    } finally {
+      setExporting(false)
+    }
+  }
+
   const panelEvents = panelKey ? byDay[panelKey] || [] : []
 
   return (
@@ -149,8 +167,16 @@ export default function Calendar({ version, bump }) {
         <div className="text-base font-semibold text-slate-800">{title}</div>
 
         <button
+          onClick={exportDocx}
+          disabled={exporting}
+          title="Εξαγωγή όλου του σχολικού έτους (1 Σεπ – 31 Αυγ) σε Word"
+          className="ml-auto inline-flex items-center gap-1.5 rounded-md border border-slate-300 px-3 py-1.5 text-sm font-medium text-slate-600 hover:bg-slate-50 disabled:opacity-40"
+        >
+          <Download size={15} /> {exporting ? 'Εξαγωγή…' : 'Εξαγωγή σε Word'}
+        </button>
+        <button
           onClick={() => setNoteEdit({ date: toKey(cursor), title: '', note: '' })}
-          className="ml-auto inline-flex items-center gap-1.5 rounded-md bg-amber-500 px-3 py-1.5 text-sm font-medium text-white hover:bg-amber-600"
+          className="inline-flex items-center gap-1.5 rounded-md bg-amber-500 px-3 py-1.5 text-sm font-medium text-white hover:bg-amber-600"
         >
           <Plus size={15} /> Νέα σημείωση
         </button>

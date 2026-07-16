@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import api from './api'
 import Arrivals from './tabs/Arrivals'
 import Students from './tabs/Students'
@@ -9,6 +9,7 @@ import Observatory from './tabs/Observatory'
 import Calendar from './tabs/Calendar'
 import HelpModal from './components/HelpModal'
 import DepartureDetectionModal from './components/DepartureDetectionModal'
+import EmailPromptModal from './components/EmailPromptModal'
 import { Upload, FileText, Download, Database, PlaneLanding, Users, Trash2, Settings as SettingsIcon, BarChart3, ClipboardList, CalendarDays, BookOpen, HelpCircle } from 'lucide-react'
 
 const TABS = [
@@ -28,6 +29,11 @@ export default function App() {
   const [toast, setToast] = useState(null)
   const [showHelp, setShowHelp] = useState(false)
   const [departures, setDepartures] = useState(null)
+  const [emailPrompt, setEmailPrompt] = useState(null) // { uid, filename, date, subject }
+  const [emailBusy, setEmailBusy] = useState(false)
+  const [emailTick, setEmailTick] = useState(0) // αλλαγές ρυθμίσεων e-mail → επαναρύθμιση poller
+  const emailTimerRef = useRef(null)
+  const handledUidRef = useRef(null) // uid που ήδη εισήχθη ή απορρίφθηκε (να μη ξαναρωτά)
 
   const bump = () => setVersion((v) => v + 1)
 
@@ -66,6 +72,85 @@ export default function App() {
     // Ανίχνευση αποχωρήσεων: μαθητές που υπάρχουν ήδη αλλά λείπουν από τη νέα λίστα.
     if (res.departed && res.departed.length) setDepartures(res.departed)
   }
+
+  // ---- Αυτόματη εισαγωγή λίστας από e-mail (πειραματικό) --------------------
+  const FREQ_MS = {
+    '15m': 15 * 60000, '30m': 30 * 60000, '1h': 3600000,
+    '2h': 2 * 3600000, '3h': 3 * 3600000, '24h': 24 * 3600000,
+  }
+
+  // Έλεγχος για νέα λίστα. manual=true → εμφανίζει και μηνύματα «δεν βρέθηκε/ήδη εισαχθεί».
+  async function checkEmail({ manual } = {}) {
+    const res = await api.mailCheck()
+    if (!res) return
+    if (res.error) {
+      if (manual) showToast(res.error, 'error')
+      return
+    }
+    if (!res.configured) {
+      if (manual) showToast('Δεν έχουν οριστεί στοιχεία e-mail στις Ρυθμίσεις.', 'warn')
+      return
+    }
+    if (!res.found) {
+      if (manual)
+        showToast(
+          res.noAttachment
+            ? 'Βρέθηκε e-mail λίστας αλλά χωρίς συνημμένο PDF.'
+            : 'Δεν βρέθηκε e-mail με λίστα πληθυσμού (τελευταίες 50 ημέρες).',
+          'warn'
+        )
+      return
+    }
+    const msgKey = `${res.mailbox}:${res.uid}`
+    if (res.alreadyImported) {
+      handledUidRef.current = msgKey
+      if (manual) showToast(`Η πιο πρόσφατη λίστα («${res.filename}») έχει ήδη εισαχθεί.`)
+      return
+    }
+    // Νέα λίστα: στον αυτόματο έλεγχο ρωτάμε μία φορά ανά μήνυμα.
+    if (!manual && handledUidRef.current === msgKey) return
+    setEmailPrompt({ mailbox: res.mailbox, uid: res.uid, filename: res.filename, date: res.date, subject: res.subject })
+  }
+
+  async function importFromEmail(prompt) {
+    setEmailBusy(true)
+    const res = await api.mailImportMessage({ mailbox: prompt.mailbox, uid: prompt.uid })
+    setEmailBusy(false)
+    handledUidRef.current = `${prompt.mailbox}:${prompt.uid}`
+    setEmailPrompt(null)
+    reportImport(res)
+  }
+
+  function dismissEmailPrompt() {
+    if (emailPrompt) handledUidRef.current = `${emailPrompt.mailbox}:${emailPrompt.uid}`
+    setEmailPrompt(null)
+  }
+
+  // Poller: έλεγχος στην εκκίνηση + περιοδικά, βάσει ρυθμίσεων. Επαναρυθμίζεται όταν αλλάξουν
+  // οι ρυθμίσεις e-mail (emailTick).
+  useEffect(() => {
+    let cancelled = false
+    if (emailTimerRef.current) {
+      clearInterval(emailTimerRef.current)
+      emailTimerRef.current = null
+    }
+    api.mailGetConfig().then((cfg) => {
+      if (cancelled || !cfg) return
+      const configured = cfg.username && cfg.hasPassword
+      if (!configured || cfg.autoFreq === 'off') return
+      checkEmail({ manual: false })
+      const ms = FREQ_MS[cfg.autoFreq]
+      if (ms) emailTimerRef.current = setInterval(() => checkEmail({ manual: false }), ms)
+    })
+    return () => {
+      cancelled = true
+      if (emailTimerRef.current) {
+        clearInterval(emailTimerRef.current)
+        emailTimerRef.current = null
+      }
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [emailTick])
 
   async function doImport() {
     reportImport(await api.importXlsx())
@@ -162,9 +247,27 @@ export default function App() {
         </button>
       </nav>
 
-      <main className="flex-1 overflow-auto p-5">{Active && <Active version={version} bump={bump} />}</main>
+      <main className="flex-1 overflow-auto p-5">
+        {Active && (
+          <Active
+            version={version}
+            bump={bump}
+            emailCheck={() => checkEmail({ manual: true })}
+            onEmailConfigChange={() => setEmailTick((t) => t + 1)}
+          />
+        )}
+      </main>
 
       {showHelp && <HelpModal onClose={() => setShowHelp(false)} />}
+
+      {emailPrompt && (
+        <EmailPromptModal
+          prompt={emailPrompt}
+          busy={emailBusy}
+          onImport={importFromEmail}
+          onClose={dismissEmailPrompt}
+        />
+      )}
 
       {departures && (
         <DepartureDetectionModal

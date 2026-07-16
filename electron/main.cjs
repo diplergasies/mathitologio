@@ -1,6 +1,6 @@
 'use strict'
 
-const { app, BrowserWindow, ipcMain, dialog, shell } = require('electron')
+const { app, BrowserWindow, ipcMain, dialog, shell, safeStorage } = require('electron')
 const fs = require('fs')
 const path = require('path')
 
@@ -8,6 +8,7 @@ const db = require('./db.cjs')
 const grades = require('./grades.cjs')
 const importer = require('./importer.cjs')
 const documents = require('./documents.cjs')
+const mail = require('./mail.cjs')
 
 const isDev = !!process.env.VITE_DEV_SERVER_URL
 
@@ -703,6 +704,159 @@ ipcMain.handle('calendar:updateNote', (_e, { id, date, title, note } = {}) => {
 ipcMain.handle('calendar:deleteNote', (_e, id) => {
   db.run('DELETE FROM calendar_notes WHERE id=$id', { $id: id })
   return { ok: true }
+})
+
+// Αποθήκευση του Ημερολογίου (buffer .docx από το renderer) σε αρχείο Word.
+ipcMain.handle('calendar:saveDocx', async (_e, { data, defaultName } = {}) => {
+  if (!data) return { canceled: true }
+  const { canceled, filePath } = await dialog.showSaveDialog({
+    title: 'Αποθήκευση Ημερολογίου σε Word',
+    defaultPath: defaultName || 'imerologio.docx',
+    filters: [{ name: 'Έγγραφο Word', extensions: ['docx'] }],
+  })
+  if (canceled || !filePath) return { canceled: true }
+  try {
+    fs.writeFileSync(filePath, Buffer.from(data))
+    return { ok: true, filePath }
+  } catch (err) {
+    return { error: `Αποτυχία αποθήκευσης: ${err && err.message ? err.message : err}` }
+  }
+})
+
+// ---- Αυτόματη εισαγωγή λίστας από e-mail (sch.gr) — πειραματικό --------------
+
+// Στοιχεία σύνδεσης: host/port/username/autoFreq αποθηκεύονται ως απλό κείμενο,
+// ο κωδικός κρυπτογραφημένος με το OS keystore (Electron safeStorage).
+function getMailConfig() {
+  const s = db.getAllSettings()
+  let password = ''
+  if (s.mail_password_enc && safeStorage.isEncryptionAvailable()) {
+    try {
+      password = safeStorage.decryptString(Buffer.from(s.mail_password_enc, 'base64'))
+    } catch {
+      password = ''
+    }
+  }
+  return {
+    host: s.mail_host || 'mail.sch.gr',
+    port: Number(s.mail_port) || 993,
+    username: s.mail_username || '',
+    password,
+    autoFreq: s.mail_auto_freq || 'off',
+  }
+}
+
+function lastImportFilename() {
+  const rows = db.query('SELECT source_filename FROM batches ORDER BY id DESC LIMIT 1')
+  return rows.length ? String(rows[0].source_filename || '') : ''
+}
+
+// Ασφαλές όνομα αρχείου (χωρίς μη έγκυρους χαρακτήρες διαδρομής). Χρησιμοποιείται τόσο για το
+// προσωρινό αρχείο όσο και για τη σύγκριση dedup, ώστε να ταυτίζονται πάντα.
+function sanitizeName(n) {
+  return String(n || 'ΣΕΠ.pdf').replace(/[\\/:*?"<>|]/g, '_')
+}
+
+// Προσωρινή μνήμη τελευταίου κατεβασμένου συνημμένου (για να μη ξανακατεβαίνει στο import).
+let mailCache = null // { mailbox, uid, filename, content }
+
+ipcMain.handle('mail:getConfig', () => {
+  const s = db.getAllSettings()
+  return {
+    host: s.mail_host || 'mail.sch.gr',
+    port: Number(s.mail_port) || 993,
+    username: s.mail_username || '',
+    hasPassword: !!s.mail_password_enc,
+    autoFreq: s.mail_auto_freq || 'off',
+    encAvailable: safeStorage.isEncryptionAvailable(),
+  }
+})
+
+ipcMain.handle('mail:setConfig', (_e, cfg = {}) => {
+  const patch = {
+    mail_host: String(cfg.host || 'mail.sch.gr').trim(),
+    mail_port: String(Number(cfg.port) || 993),
+    mail_username: String(cfg.username || '').trim(),
+    mail_auto_freq: String(cfg.autoFreq || 'off'),
+  }
+  // Κωδικός: αποθηκεύεται μόνο αν δόθηκε νέος (μη κενός). Το κενό πεδίο διατηρεί τον υπάρχοντα.
+  if (typeof cfg.password === 'string' && cfg.password.length > 0) {
+    if (!safeStorage.isEncryptionAvailable())
+      return { error: 'Η κρυπτογράφηση κωδικού δεν είναι διαθέσιμη σε αυτό το σύστημα.' }
+    patch.mail_password_enc = safeStorage.encryptString(cfg.password).toString('base64')
+  }
+  db.setSettings(patch)
+  return { ok: true }
+})
+
+// Σβήσιμο συνθηματικών + απενεργοποίηση αυτόματης εισαγωγής.
+ipcMain.handle('mail:clearCredentials', () => {
+  db.setSettings({ mail_username: '', mail_password_enc: '', mail_auto_freq: 'off' })
+  mailCache = null
+  return { ok: true }
+})
+
+ipcMain.handle('mail:test', async () => {
+  const cfg = getMailConfig()
+  if (!cfg.username || !cfg.password)
+    return { error: 'Συμπλήρωσε όνομα χρήστη και κωδικό πρώτα.' }
+  return mail.testConnection(cfg)
+})
+
+// Έλεγχος για νέα λίστα: εντοπίζει την πιο πρόσφατη και συγκρίνει το όνομα του συνημμένου
+// με το όνομα της τελευταίας λίστας που εισήχθη (dedup βάσει filename «ΣΕΠ <ημ/νία>.pdf»).
+ipcMain.handle('mail:check', async () => {
+  const cfg = getMailConfig()
+  if (!cfg.username || !cfg.password) return { ok: true, configured: false }
+  const known = mailCache ? { mailbox: mailCache.mailbox, uid: mailCache.uid } : null
+  const r = await mail.checkLatest(cfg, known)
+  if (r.error) return { error: r.error }
+  if (!r.found) return { ok: true, configured: true, found: false, noAttachment: !!r.noAttachment }
+  // unchanged → επαναχρησιμοποίηση του ήδη κατεβασμένου συνημμένου (χωρίς νέα λήψη).
+  const filename = r.unchanged && mailCache ? mailCache.filename : r.filename
+  if (!r.unchanged) mailCache = { mailbox: r.mailbox, uid: r.uid, filename: r.filename, content: r.content }
+  // Dedup: σύγκριση με το ίδιο «ασφαλές» όνομα που αποθηκεύεται ως source_filename κατά την εισαγωγή.
+  const alreadyImported = sanitizeName(filename) === lastImportFilename()
+  return {
+    ok: true,
+    configured: true,
+    found: true,
+    mailbox: r.mailbox,
+    uid: r.uid,
+    filename,
+    subject: r.subject,
+    date: r.date ? new Date(r.date).toISOString() : null,
+    alreadyImported,
+  }
+})
+
+// Εισαγωγή του συνημμένου PDF ενός μηνύματος (από cache ή εκ νέου λήψη) μέσω του υπάρχοντος importer.
+// Ταυτότητα μηνύματος: { mailbox, uid } (τα uid είναι μοναδικά ανά φάκελο).
+ipcMain.handle('mail:import', async (_e, id = {}) => {
+  const mailbox = id && id.mailbox
+  const uid = id && id.uid
+  let att = mailCache && mailCache.mailbox === mailbox && mailCache.uid === uid ? mailCache : null
+  if (!att) {
+    const cfg = getMailConfig()
+    if (!cfg.username || !cfg.password) return { error: 'Δεν υπάρχουν στοιχεία σύνδεσης.' }
+    const r = await mail.downloadByUid(cfg, mailbox, uid)
+    if (r.error) return { error: r.error }
+    att = { mailbox, uid, filename: r.filename, content: r.content }
+  }
+  // Το όνομα αρχείου γίνεται source_filename του batch (για τον έλεγχο «ήδη εισαχθεί»).
+  const dir = path.join(app.getPath('temp'), 'mathitologio-mail')
+  try {
+    fs.mkdirSync(dir, { recursive: true })
+    const tmp = path.join(dir, sanitizeName(att.filename))
+    fs.writeFileSync(tmp, att.content)
+    const parsed = await importer.parsePdf(tmp)
+    const res = insertRecords(tmp, parsed)
+    try { fs.unlinkSync(tmp) } catch {}
+    mailCache = null
+    return res
+  } catch (err) {
+    return { error: `Αποτυχία εισαγωγής από e-mail: ${err && err.message ? err.message : err}` }
+  }
 })
 
 // ---- Μαζικές ενέργειες ----------------------------------------------------
