@@ -1,15 +1,51 @@
 'use strict'
 
 // Ανάγνωση λίστας πληθυσμού (ΣΕΠ) από γραμματοκιβώτιο sch.gr μέσω IMAP.
-// Ρόλος: εντοπισμός του πιο πρόσφατου e-mail με θέμα «Λίστα πληθυσμού … (ΣΕΠ)» (τελευταίες
-// SEARCH_DAYS ημέρες) και λήψη του συνημμένου PDF, ώστε να τροφοδοτηθεί ο υπάρχων importer.
+// Ρόλος: εντοπισμός του πιο πρόσφατου e-mail που ταιριάζει με τα κριτήρια που όρισε ο χρήστης
+// (θέμα / αποστολέας / όνομα PDF, τελευταίες searchDays ημέρες) και λήψη του συνημμένου PDF,
+// ώστε να τροφοδοτηθεί ο υπάρχων importer.
+// Ταυτοποίηση με ψηφοφορία: αρκεί να ταιριάξουν ≥ 2 από τα ΟΡΙΣΜΕΝΑ κριτήρια (βλ. checkLatest).
 // ΜΟΝΟ ανάγνωση — δεν στέλνει/διαγράφει τίποτα.
 
 const { ImapFlow } = require('imapflow')
 const { simpleParser } = require('mailparser')
 
-const SEARCH_DAYS = 50
-const SUBJECT_MATCH = 'λίστα πληθυσμού' // πεζά, χωρίς τόνους-ευαισθησία μέσω toLowerCase
+const DEFAULT_SEARCH_DAYS = 50
+
+// Κανονικοποίηση για σύγκριση κειμένου: αφαίρεση τόνων (NFD + combining marks), πεζά, trim.
+function norm(s) {
+  return String(s || '')
+    .normalize('NFD')
+    .replace(/[̀-ͯ]/g, '')
+    .toLowerCase()
+    .trim()
+}
+
+// «Περιέχει» με αγνόηση πεζών/κεφαλαίων & τόνων. Κενό/μη ορισμένο κριτήριο → false (δεν μετρά).
+function contains(haystack, needle) {
+  const n = norm(needle)
+  if (!n) return false
+  return norm(haystack).includes(n)
+}
+
+// Συμβολοσειρά αποστολέα από τον envelope (όνομα + διεύθυνση όλων των from), για αναζήτηση.
+function fromString(env) {
+  const arr = (env && env.from) || []
+  return arr.map((a) => `${(a && a.name) || ''} ${(a && a.address) || ''}`).join(' ')
+}
+
+// Συμπλήρωση προεπιλογών στα κριτήρια που έρχονται από το config.
+function withDefaults(config) {
+  const c = config || {}
+  const days = Number(c.searchDays)
+  return {
+    ...c,
+    searchDays: days > 0 ? days : DEFAULT_SEARCH_DAYS,
+    subjectMatch: c.subjectMatch || '',
+    senderMatch: c.senderMatch || '',
+    filenameMatch: c.filenameMatch || '',
+  }
+}
 
 function daysAgo(n) {
   const d = new Date()
@@ -54,27 +90,39 @@ function friendly(err) {
   return `Αποτυχία: ${m}`
 }
 
-// Εύρεση του πιο πρόσφατου μηνύματος-λίστας σε έναν φάκελο (τελευταίες SEARCH_DAYS ημέρες).
-// Επιστρέφει { uid, date, subject, t } ή null. Ο φάκελος πρέπει να είναι ήδη ανοιχτός (locked).
-async function findLatestInOpen(client) {
-  const uids = await client.search({ since: daysAgo(SEARCH_DAYS) }, { uid: true })
+// Envelope-score ενός μηνύματος: πλήθος ταιριασμάτων στα κριτήρια που ελέγχονται φθηνά (χωρίς λήψη):
+// θέμα + αποστολέας. Το κριτήριο ονόματος PDF προστίθεται αργότερα (απαιτεί λήψη συνημμένου).
+function envelopeScore(env, cfg) {
+  let score = 0
+  if (contains((env && env.subject) || '', cfg.subjectMatch)) score++
+  if (contains(fromString(env), cfg.senderMatch)) score++
+  return score
+}
+
+// Εύρεση του πιο πρόσφατου υποψήφιου μηνύματος σε έναν φάκελο (τελευταίες cfg.searchDays ημέρες).
+// Υποψήφιο = envScore ≥ 1. Επιλογή με προτεραιότητα (envScore ↓, ημερομηνία ↓).
+// Επιστρέφει { uid, date, subject, from, envScore, t } ή null. Ο φάκελος πρέπει να είναι locked.
+async function findLatestInOpen(client, cfg) {
+  const uids = await client.search({ since: daysAgo(cfg.searchDays) }, { uid: true })
   if (!uids || !uids.length) return null
 
   let best = null
   for await (const msg of client.fetch({ uid: uids }, { uid: true, envelope: true })) {
-    const subject = (msg.envelope && msg.envelope.subject) || ''
-    if (!subject.toLowerCase().includes(SUBJECT_MATCH)) continue
-    const date = (msg.envelope && msg.envelope.date) || null
+    const env = msg.envelope || {}
+    const envScore = envelopeScore(env, cfg)
+    if (envScore < 1) continue
+    const date = env.date || null
     const t = date ? new Date(date).getTime() : 0
-    if (!best || t > best.t) best = { uid: msg.uid, date, subject, t }
+    if (!best || envScore > best.envScore || (envScore === best.envScore && t > best.t))
+      best = { uid: msg.uid, date, subject: env.subject || '', from: fromString(env), envScore, t }
   }
   return best
 }
 
-// Εύρεση του πιο πρόσφατου μηνύματος-λίστας σε ΟΛΟΥΣ τους φακέλους του γραμματοκιβωτίου.
-// Επιστρέφει { mailbox, uid, date, subject } ή null.
-async function findLatestAllFolders(client) {
-  let best = null // { mailbox, uid, date, subject, t }
+// Εύρεση του καλύτερου υποψήφιου μηνύματος σε ΟΛΟΥΣ τους φακέλους του γραμματοκιβωτίου.
+// Επιστρέφει { mailbox, uid, date, subject, from, envScore } ή null.
+async function findLatestAllFolders(client, cfg) {
+  let best = null // { mailbox, uid, date, subject, from, envScore, t }
   const boxes = await client.list()
   for (const box of boxes) {
     // Παράλειψη μη-επιλέξιμων φακέλων (π.χ. containers).
@@ -82,8 +130,9 @@ async function findLatestAllFolders(client) {
     let lock = null
     try {
       lock = await client.getMailboxLock(box.path)
-      const hit = await findLatestInOpen(client)
-      if (hit && (!best || hit.t > best.t)) best = { mailbox: box.path, ...hit }
+      const hit = await findLatestInOpen(client, cfg)
+      if (hit && (!best || hit.envScore > best.envScore || (hit.envScore === best.envScore && hit.t > best.t)))
+        best = { mailbox: box.path, ...hit }
     } catch {
       // Αγνόησε φακέλους που δεν ανοίγουν και συνέχισε στους υπόλοιπους.
     } finally {
@@ -91,7 +140,7 @@ async function findLatestAllFolders(client) {
     }
   }
   if (!best) return null
-  return { mailbox: best.mailbox, uid: best.uid, date: best.date, subject: best.subject }
+  return { mailbox: best.mailbox, uid: best.uid, date: best.date, subject: best.subject, from: best.from, envScore: best.envScore }
 }
 
 // Λήψη πλήρους μηνύματος + εξαγωγή του πρώτου συνημμένου PDF (φάκελος ήδη ανοιχτός).
@@ -106,15 +155,18 @@ async function fetchPdfAttachment(client, uid) {
   return { filename: (pdf.filename || 'ΣΕΠ.pdf').trim(), content: pdf.content }
 }
 
-// Σύνθετη: σύνδεση → εντοπισμός πιο πρόσφατης λίστας σε όλους τους φακέλους → λήψη συνημμένου PDF.
+// Σύνθετη: σύνδεση → εντοπισμός καλύτερου υποψήφιου σε όλους τους φακέλους → λήψη συνημμένου PDF →
+// τελική ταυτοποίηση με ψηφοφορία «≥ 2 ορισμένα κριτήρια» (θέμα/αποστολέας envelope + όνομα PDF).
 // Αν ταυτότητα (mailbox+uid) == known, παραλείπεται η (βαριά) λήψη και επιστρέφεται unchanged.
 // Επιστρέφει { ok, found, mailbox, uid, date, subject, filename, content } ή { error }.
 async function checkLatest(config, known) {
-  const client = makeClient(config)
+  const cfg = withDefaults(config)
+  const client = makeClient(cfg)
   try {
     await client.connect()
-    const latest = await findLatestAllFolders(client)
+    const latest = await findLatestAllFolders(client, cfg)
     if (!latest) return { ok: true, found: false }
+    // Ήδη γνωστό μήνυμα: είχε ήδη περάσει τον έλεγχο ≥2 όταν εντοπίστηκε — δεν ξανακατεβαίνει.
     if (known && known.mailbox === latest.mailbox && known.uid === latest.uid) {
       return { ok: true, found: true, unchanged: true, ...latest }
     }
@@ -127,6 +179,9 @@ async function checkLatest(config, known) {
       if (lock) try { lock.release() } catch {}
     }
     if (!att) return { ok: true, found: false, noAttachment: true, subject: latest.subject }
+    // Ψηφοφορία: envScore (θέμα+αποστολέας) + όνομα PDF. Ταυτοποίηση αν ≥ 2 ορισμένα κριτήρια ταιριάξουν.
+    const nameMatch = contains(att.filename, cfg.filenameMatch) ? 1 : 0
+    if (latest.envScore + nameMatch < 2) return { ok: true, found: false }
     return { ok: true, found: true, ...latest, ...att }
   } catch (err) {
     return { error: friendly(err) }
@@ -158,4 +213,4 @@ async function downloadByUid(config, mailbox, uid) {
   }
 }
 
-module.exports = { testConnection, checkLatest, downloadByUid, SEARCH_DAYS }
+module.exports = { testConnection, checkLatest, downloadByUid, norm, contains, DEFAULT_SEARCH_DAYS }

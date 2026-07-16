@@ -96,7 +96,7 @@ export default function App() {
         showToast(
           res.noAttachment
             ? 'Βρέθηκε e-mail λίστας αλλά χωρίς συνημμένο PDF.'
-            : 'Δεν βρέθηκε e-mail με λίστα πληθυσμού (τελευταίες 50 ημέρες).',
+            : 'Δεν βρέθηκε e-mail που να ταιριάζει με τα κριτήρια που όρισες.',
           'warn'
         )
       return

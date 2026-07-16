@@ -547,8 +547,16 @@ function EmailImportSection({ emailCheck, onEmailConfigChange }) {
   const [hasPassword, setHasPassword] = useState(false)
   const [autoFreq, setAutoFreq] = useState('off')
   const [encAvailable, setEncAvailable] = useState(true)
+  // Επεξεργάσιμα κριτήρια ταυτοποίησης του e-mail (≥2 πρέπει να είναι συμπληρωμένα).
+  const [subjectMatch, setSubjectMatch] = useState('')
+  const [senderMatch, setSenderMatch] = useState('')
+  const [filenameMatch, setFilenameMatch] = useState('')
+  const [searchDays, setSearchDays] = useState('50')
   const [msg, setMsg] = useState(null) // { text, type }
   const [busy, setBusy] = useState('') // '' | 'save' | 'test' | 'check' | 'clear'
+
+  // Πλήθος συμπληρωμένων κριτηρίων — χρειάζονται ≥2 για ασφαλή ταυτοποίηση.
+  const criteriaCount = [subjectMatch, senderMatch, filenameMatch].filter((v) => v.trim()).length
 
   function reload() {
     api.mailGetConfig().then((c) => {
@@ -559,15 +567,29 @@ function EmailImportSection({ emailCheck, onEmailConfigChange }) {
       setHasPassword(!!c.hasPassword)
       setAutoFreq(c.autoFreq || 'off')
       setEncAvailable(c.encAvailable !== false)
+      setSubjectMatch(c.subjectMatch || '')
+      setSenderMatch(c.senderMatch || '')
+      setFilenameMatch(c.filenameMatch || '')
+      setSearchDays(String(c.searchDays || 50))
       setPassword('')
     })
   }
   useEffect(reload, [])
 
+  // Κοινό payload ρυθμίσεων (στοιχεία σύνδεσης + κριτήρια ταυτοποίησης).
+  function configPayload() {
+    return { host, port, username, password, autoFreq, subjectMatch, senderMatch, filenameMatch, searchDays }
+  }
+
   async function save() {
+    if (criteriaCount < 2)
+      return setMsg({
+        text: 'Συμπλήρωσε τουλάχιστον 2 κριτήρια ταυτοποίησης (Θέμα / Αποστολέας / Όνομα PDF).',
+        type: 'error',
+      })
     setBusy('save')
     setMsg(null)
-    const res = await api.mailSetConfig({ host, port, username, password, autoFreq })
+    const res = await api.mailSetConfig(configPayload())
     setBusy('')
     if (res && res.error) return setMsg({ text: res.error, type: 'error' })
     setPassword('')
@@ -580,7 +602,7 @@ function EmailImportSection({ emailCheck, onEmailConfigChange }) {
     setBusy('test')
     setMsg(null)
     // Αποθήκευση πρώτα ώστε ο έλεγχος να χρησιμοποιεί τα τρέχοντα στοιχεία.
-    await api.mailSetConfig({ host, port, username, password, autoFreq })
+    await api.mailSetConfig(configPayload())
     setPassword('')
     const res = await api.mailTestConnection()
     setBusy('')
@@ -590,9 +612,14 @@ function EmailImportSection({ emailCheck, onEmailConfigChange }) {
   }
 
   async function checkNow() {
+    if (criteriaCount < 2)
+      return setMsg({
+        text: 'Συμπλήρωσε τουλάχιστον 2 κριτήρια ταυτοποίησης πρώτα.',
+        type: 'error',
+      })
     setBusy('check')
     setMsg(null)
-    await api.mailSetConfig({ host, port, username, password, autoFreq })
+    await api.mailSetConfig(configPayload())
     setPassword('')
     reload()
     onEmailConfigChange && onEmailConfigChange()
@@ -620,9 +647,9 @@ function EmailImportSection({ emailCheck, onEmailConfigChange }) {
         <span className="rounded bg-amber-100 px-1.5 py-0.5 text-xs font-medium text-amber-700">Πειραματικό</span>
       </h3>
       <p className="mb-3 text-xs text-slate-400">
-        Ελέγχει το γραμματοκιβώτιο (IMAP) για το πιο πρόσφατο e-mail με θέμα{' '}
-        <strong>«Λίστα πληθυσμού … (ΣΕΠ)»</strong> των τελευταίων 50 ημερών και προτείνει την εισαγωγή
-        του συνημμένου PDF. Ο κωδικός αποθηκεύεται <strong>κρυπτογραφημένος</strong> τοπικά. Ο έλεγχος
+        Ελέγχει το γραμματοκιβώτιο (IMAP) για το πιο πρόσφατο e-mail που ταιριάζει με τα{' '}
+        <strong>κριτήρια ταυτοποίησης</strong> που ορίζεις πιο κάτω και προτείνει την εισαγωγή του
+        συνημμένου PDF. Ο κωδικός αποθηκεύεται <strong>κρυπτογραφημένος</strong> τοπικά. Ο έλεγχος
         γίνεται στην εκκίνηση και με τη συχνότητα που ορίζεις.
       </p>
 
@@ -665,6 +692,43 @@ function EmailImportSection({ emailCheck, onEmailConfigChange }) {
               <option key={o.value} value={o.value}>{o.label}</option>
             ))}
           </select>
+        </div>
+      </div>
+
+      <h4 className="mt-4 mb-1 text-sm font-semibold text-slate-700">Κριτήρια ταυτοποίησης του e-mail</h4>
+      <div className="mb-3 flex items-start gap-1.5 rounded-md bg-amber-50 px-2.5 py-2 text-xs text-amber-700">
+        <AlertTriangle size={14} className="mt-0.5 shrink-0" />
+        <span>
+          Βάλε μόνο το <strong>σταθερό μέρος</strong> κάθε κριτηρίου. Π.χ. αν η λίστα έρχεται με θέμα
+          «Λίστα πληθυσμού 15/09/2026», γράψε μόνο <strong>«Λίστα πληθυσμού»</strong>. Η αντιστοίχιση
+          αγνοεί πεζά/κεφαλαία και τόνους. Συμπλήρωσε <strong>τουλάχιστον 2 από τα 3</strong> κριτήρια
+          (Θέμα / Αποστολέας / Όνομα PDF) — το e-mail ταυτοποιείται όταν ταιριάξουν ≥ 2 από όσα όρισες.
+        </span>
+      </div>
+
+      <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+        <div className="sm:col-span-2">
+          <label className="mb-1 block text-sm text-slate-600">Θέμα e-mail (σταθερό μέρος)</label>
+          <input value={subjectMatch} onChange={(e) => setSubjectMatch(e.target.value)} placeholder="π.χ. Λίστα πληθυσμού" className={inputCls} />
+        </div>
+        <div className="sm:col-span-2">
+          <label className="mb-1 block text-sm text-slate-600">Αποστολέας (e-mail ή όνομα)</label>
+          <input value={senderMatch} onChange={(e) => setSenderMatch(e.target.value)} placeholder="π.χ. @sch.gr ή τμήμα@…" className={inputCls} />
+        </div>
+        <div className="sm:col-span-2">
+          <label className="mb-1 block text-sm text-slate-600">Όνομα αρχείου PDF (σταθερό μέρος)</label>
+          <input value={filenameMatch} onChange={(e) => setFilenameMatch(e.target.value)} placeholder="π.χ. ΣΕΠ" className={inputCls} />
+        </div>
+        <div>
+          <label className="mb-1 block text-sm text-slate-600">Αναζήτηση τελευταίων ημερών</label>
+          <input type="number" min="1" value={searchDays} onChange={(e) => setSearchDays(e.target.value)} placeholder="50" className={inputCls} />
+        </div>
+        <div className="flex items-end">
+          <p className={`text-xs ${criteriaCount < 2 ? 'text-red-600' : 'text-green-600'}`}>
+            {criteriaCount < 2
+              ? `Ορισμένα κριτήρια: ${criteriaCount}/3 — χρειάζονται τουλάχιστον 2.`
+              : `Ορισμένα κριτήρια: ${criteriaCount}/3 ✓`}
+          </p>
         </div>
       </div>
 

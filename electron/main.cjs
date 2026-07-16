@@ -743,6 +743,11 @@ function getMailConfig() {
     username: s.mail_username || '',
     password,
     autoFreq: s.mail_auto_freq || 'off',
+    // Επεξεργάσιμα κριτήρια ταυτοποίησης (πειραματικό): ≥2 από αυτά ταιριάζουν → «λίστα πληθυσμού».
+    subjectMatch: s.mail_subject_match || '',
+    senderMatch: s.mail_sender_match || '',
+    filenameMatch: s.mail_filename_match || '',
+    searchDays: Number(s.mail_search_days) || 50,
   }
 }
 
@@ -769,6 +774,10 @@ ipcMain.handle('mail:getConfig', () => {
     hasPassword: !!s.mail_password_enc,
     autoFreq: s.mail_auto_freq || 'off',
     encAvailable: safeStorage.isEncryptionAvailable(),
+    subjectMatch: s.mail_subject_match || '',
+    senderMatch: s.mail_sender_match || '',
+    filenameMatch: s.mail_filename_match || '',
+    searchDays: Number(s.mail_search_days) || 50,
   }
 })
 
@@ -778,6 +787,10 @@ ipcMain.handle('mail:setConfig', (_e, cfg = {}) => {
     mail_port: String(Number(cfg.port) || 993),
     mail_username: String(cfg.username || '').trim(),
     mail_auto_freq: String(cfg.autoFreq || 'off'),
+    mail_subject_match: String(cfg.subjectMatch || '').trim(),
+    mail_sender_match: String(cfg.senderMatch || '').trim(),
+    mail_filename_match: String(cfg.filenameMatch || '').trim(),
+    mail_search_days: String(Number(cfg.searchDays) || 50),
   }
   // Κωδικός: αποθηκεύεται μόνο αν δόθηκε νέος (μη κενός). Το κενό πεδίο διατηρεί τον υπάρχοντα.
   if (typeof cfg.password === 'string' && cfg.password.length > 0) {
