@@ -1,17 +1,13 @@
-name: Build Windows installer (Πειραματικό — private artifact)
+name: Build Windows installer (Πειραματικό — private prerelease)
 
-# Ιδιωτικό build ΜΟΝΟ για τον προγραμματιστή: χτίζει το πειραματικό .exe και το ανεβάζει
-# ΑΠΟΚΛΕΙΣΤΙΚΑ ως GitHub artifact (κατέβασμα από την καρτέλα Actions → run → Artifacts).
-# ΔΕΝ δημιουργεί Release και ΔΕΝ ανεβάζει στο Google Drive.
+# Ιδιωτικό build ΜΟΝΟ για τον προγραμματιστή: χτίζει το πειραματικό .exe και το επισυνάπτει
+# σε ΙΔΙΩΤΙΚΟ prerelease (tag `exp-latest`) του private repo. Επειδή το repo είναι private,
+# μόνο εσύ έχεις πρόσβαση. ΔΕΝ ανεβαίνει στο Google Drive.
 #
-# Τρέχει μόνο χειροκίνητα: Actions → «Build Windows installer (Πειραματικό …)» → Run workflow,
-# διαλέγοντας τον κλάδο (branch) `experimental`.
+# Γιατί release αντί για artifact: τα Actions artifacts μοιράζονται account-wide quota (500 MB)
+# που γεμίζει εύκολα· τα release assets ΔΕΝ χρεώνονται σε αυτό το quota.
 #
-# ΣΗΜ. quota: το artifact είναι ~300 MB. Κατέβασέ το και ΔΙΕΓΡΑΨΕ το run/artifact μετά,
-# ώστε να μη γεμίζει το δωρεάν artifact quota (500 MB).
-
-# Τρέχει χειροκίνητα (αν το workflow υπάρχει και στον default branch) ΚΑΙ αυτόματα σε κάθε
-# push στον κλάδο `experimental` — έτσι κάθε ενημέρωση του πειραματικού παράγει νέο installer.
+# Τρέχει αυτόματα σε κάθε push στον κλάδο `experimental` (+ workflow_dispatch).
 on:
   workflow_dispatch:
   push:
@@ -19,7 +15,7 @@ on:
       - experimental
 
 permissions:
-  contents: read
+  contents: write # απαιτείται για δημιουργία/ενημέρωση Release
 
 jobs:
   build:
@@ -61,10 +57,14 @@ jobs:
       - name: Build Windows installer (.exe)
         run: npm run build && npx electron-builder --win --publish never
 
-      - name: Upload installer as private artifact
-        uses: actions/upload-artifact@v4
+      - name: Publish private prerelease with installer
+        uses: softprops/action-gh-release@v2
         with:
-          name: Mathitologio-EXP-installer
-          path: release/Mathitologio-EXP-Setup-*.exe
-          retention-days: 5
-          if-no-files-found: error
+          tag_name: exp-latest
+          name: Πειραματική έκδοση (τελευταία)
+          body: Ιδιωτικό build του κλάδου experimental. Κατέβασε το `Mathitologio-EXP-Setup-*.exe` παρακάτω.
+          prerelease: true
+          make_latest: false
+          files: release/Mathitologio-EXP-Setup-*.exe
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
