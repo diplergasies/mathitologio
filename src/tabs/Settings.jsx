@@ -340,11 +340,22 @@ function TemplatesSection() {
   const [templates, setTemplates] = useState([])
   const [msg, setMsg] = useState(null) // { text, type }
   const [busy, setBusy] = useState(false)
+  const [promptEnabled, setPromptEnabled] = useState(true) // ερώτηση έκδοσης μετά την εγγραφή
 
   function reload() {
     api.listTemplates().then((r) => setTemplates(Array.isArray(r) ? r : []))
   }
   useEffect(reload, [])
+
+  useEffect(() => {
+    api.getSettings().then((s) => setPromptEnabled(!s || s.enrollDocsPrompt !== '0'))
+  }, [])
+
+  async function togglePrompt(e) {
+    const v = e.target.checked
+    setPromptEnabled(v)
+    await api.setSettings({ enrollDocsPrompt: v ? '1' : '0' })
+  }
 
   async function add() {
     setBusy(true)
@@ -390,6 +401,11 @@ function TemplatesSection() {
         Με το «Άνοιγμα φακέλου προτύπων» μπορείς να <strong>επεξεργαστείς</strong> απευθείας τα αρχεία
         (τα ενσωματωμένα αντιγράφονται εκεί για επεξεργασία· οι αλλαγές υπερισχύουν).
       </p>
+
+      <label className="mb-3 flex cursor-pointer items-center gap-2 rounded-md border border-slate-200 bg-slate-50 p-2 text-sm text-slate-600">
+        <input type="checkbox" checked={promptEnabled} onChange={togglePrompt} />
+        Ερώτηση έκδοσης εγγράφων μετά την εγγραφή μαθητή/μαθητών
+      </label>
 
       <div className="mb-3 flex flex-wrap items-center gap-3">
         <button
@@ -822,20 +838,20 @@ export default function Settings({ version, bump, emailCheck, onEmailConfigChang
         </div>
       </div>
 
-      <SchoolYearSection bump={bump} />
-
-      <BackupSection />
-
-      <EmailImportSection emailCheck={emailCheck} onEmailConfigChange={onEmailConfigChange} />
-
-      <TemplatesSection />
-
       <div>
         <h3 className="mb-2 flex items-center gap-2 font-semibold text-slate-700">
           <School size={18} /> Σχολεία ευθύνης
         </h3>
         <Schools version={version} bump={bump} />
       </div>
+
+      <SchoolYearSection bump={bump} />
+
+      <EmailImportSection emailCheck={emailCheck} onEmailConfigChange={onEmailConfigChange} />
+
+      <BackupSection />
+
+      <TemplatesSection />
 
       <ResetSection bump={bump} />
     </div>

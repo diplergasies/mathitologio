@@ -4,47 +4,70 @@ import api from '../api'
 import SigneePicker, { signeeValid } from './SigneePicker'
 import { Loader2, ArrowLeft } from 'lucide-react'
 
-export default function BulkDocumentModal({ ids, onClose }) {
+// Δέχεται είτε `students` (αντικείμενα με ονόματα) είτε παλιό `ids` (μόνο id).
+export default function BulkDocumentModal({ students, ids: idsProp, onClose }) {
+  const list = (students && students.length ? students : (idsProp || []).map((id) => ({ id })))
+  const ids = list.map((s) => s.id)
+
   const [templates, setTemplates] = useState([])
   const [selected, setSelected] = useState([])
   const [busy, setBusy] = useState(false)
   const [result, setResult] = useState(null)
   const [signeeStep, setSigneeStep] = useState(false)
-  const [choice, setChoice] = useState({ type: 'father' })
+  const [signees, setSignees] = useState({}) // { [id]: choice }
 
   useEffect(() => {
     api.listTemplates().then((t) => {
-      const list = t || []
-      setTemplates(list)
-      setSelected(list.map((x) => x.file))
+      const arr = t || []
+      setTemplates(arr)
+      setSelected(arr.map((x) => x.file))
     })
   }, [])
+
+  // Αρχικοποίηση επιλογής υπογράφοντα ανά μαθητή (default: Πατέρας).
+  const idsKey = ids.join(',')
+  useEffect(() => {
+    setSignees((prev) => {
+      const next = { ...prev }
+      for (const id of ids) if (!next[id]) next[id] = { type: 'father' }
+      return next
+    })
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [idsKey])
 
   function toggle(file) {
     setSelected((sel) => (sel.includes(file) ? sel.filter((f) => f !== file) : [...sel, file]))
   }
 
+  function setChoiceFor(id, choice) {
+    setSignees((prev) => ({ ...prev, [id]: choice }))
+  }
+
   const needsSignee = templates.some((t) => selected.includes(t.file) && t.needsSignee)
+  const allValid = ids.every((id) => signeeValid(signees[id]))
 
   function onGenerateClick() {
     if (needsSignee) setSigneeStep(true)
     else doBulk(null)
   }
 
-  async function doBulk(signee) {
+  async function doBulk(withSignees) {
     setBusy(true)
     setResult(null)
-    const res = await api.bulkGenerate(ids, selected, signee)
+    const res = await api.bulkGenerate(ids, selected, withSignees || undefined)
     setBusy(false)
     setSigneeStep(false)
     if (res && !res.canceled) setResult(res)
   }
 
-  // Βήμα επιλογής υπογράφοντα (κοινό για όλους, ανά μαθητή)
+  const nameOf = (s) =>
+    `${s.eponymo || ''} ${s.onoma || ''}`.trim() || `Μαθητής #${s.id}`
+
+  // Βήμα επιλογής υπογράφοντα — ξεχωριστά ανά μαθητή.
   if (signeeStep) {
     return (
       <Modal
-        title="Μαζική έκδοση — υπογράφων"
+        title="Έκδοση εγγράφων — υπογράφων ανά μαθητή"
         onClose={onClose}
         footer={
           <>
@@ -55,8 +78,8 @@ export default function BulkDocumentModal({ ids, onClose }) {
               <ArrowLeft size={14} /> Πίσω
             </button>
             <button
-              onClick={() => doBulk(choice)}
-              disabled={!signeeValid(choice) || busy}
+              onClick={() => doBulk(signees)}
+              disabled={!allValid || busy}
               className="inline-flex items-center gap-1.5 rounded-md bg-blue-600 px-3 py-1.5 text-sm font-medium text-white hover:bg-blue-700 disabled:opacity-40"
             >
               {busy && <Loader2 size={14} className="animate-spin" />}
@@ -66,10 +89,16 @@ export default function BulkDocumentModal({ ids, onClose }) {
         }
       >
         <p className="mb-3 text-sm text-slate-600">
-          Η επιλογή εφαρμόζεται <strong>ανά μαθητή</strong> (π.χ. «Πατέρας» = ο πατέρας κάθε μαθητή).
+          Επίλεξε ποιος υπογράφει <strong>για κάθε μαθητή</strong>.
         </p>
-        {/* Στη μαζική δεν επιτρέπεται «Άλλο» */}
-        <SigneePicker value={choice} onChange={setChoice} allowOther={false} />
+        <div className="max-h-[55vh] space-y-3 overflow-auto pr-1">
+          {list.map((s) => (
+            <div key={s.id} className="rounded-md border border-slate-200 p-3">
+              <p className="mb-2 text-sm font-medium text-slate-700">{nameOf(s)}</p>
+              <SigneePicker value={signees[s.id]} onChange={(c) => setChoiceFor(s.id, c)} allowOther />
+            </div>
+          ))}
+        </div>
       </Modal>
     )
   }
@@ -123,8 +152,8 @@ export default function BulkDocumentModal({ ids, onClose }) {
             ))}
           </div>
           <p className="mt-2 text-xs text-slate-400">
-            Ένα PDF ανά μαθητή & έγγραφο σε φάκελο που θα επιλέξεις ({ids.length} × {selected.length} ={' '}
-            {ids.length * selected.length} αρχεία).
+            Θα δημιουργηθεί φάκελος «Έγγραφα &lt;ημερομηνία&gt;» με υποφακέλους ανά έγγραφο ({ids.length} ×{' '}
+            {selected.length} = {ids.length * selected.length} αρχεία).
           </p>
         </>
       )}
@@ -132,7 +161,8 @@ export default function BulkDocumentModal({ ids, onClose }) {
       {result && (
         <div className="mt-3 space-y-2 text-sm">
           <p className="rounded-md bg-green-50 p-2 text-green-700">
-            Δημιουργήθηκαν <strong>{result.generated}</strong> PDF στον φάκελο.
+            Δημιουργήθηκαν <strong>{result.generated}</strong> PDF στον φάκελο «Έγγραφα &lt;ημερομηνία&gt;»
+            (υποφάκελοι ανά έγγραφο).
           </p>
           {result.failed && result.failed.length > 0 && (
             <div className="rounded-md bg-red-50 p-2 text-red-700">

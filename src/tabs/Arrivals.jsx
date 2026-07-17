@@ -4,37 +4,21 @@ import StudentTable from '../components/StudentTable'
 import BulkEnrollModal from '../components/BulkEnrollModal'
 import BulkDeleteByDikaModal from '../components/BulkDeleteByDikaModal'
 import ManualArrivalModal from '../components/ManualArrivalModal'
+import EnrollDocsPrompt from '../components/EnrollDocsPrompt'
+import BulkDocumentModal from '../components/BulkDocumentModal'
 import LastImportBadge from '../components/LastImportBadge'
 import { useSelection } from '../useSelection'
 import { birthSortValue, proposedSortValue } from '../sort'
 import { GraduationCap, Trash2, Users, Hash, UserPlus } from 'lucide-react'
-
-const columns = [
-  { key: 'eponymo', label: 'Επώνυμο', editable: true },
-  { key: 'onoma', label: 'Όνομα', editable: true },
-  { key: 'patronymo', label: 'Πατρώνυμο', editable: true },
-  { key: 'monada', label: 'Μονάδα', editable: true },
-  { key: 'dika', label: 'ΔΙΚΑ', editable: true },
-  { key: 'fylo', label: 'Φύλο', editable: true },
-  { key: 'imerominia_gennisis', label: 'Ημ. γέννησης', sortable: true, sortAccessor: birthSortValue, editable: true },
-  { key: 'ithageneia', label: 'Ιθαγένεια', editable: true },
-  { key: 'glossa', label: 'Γλώσσα', editable: true },
-  { key: 'imerominia_afixis', label: 'Ημ. άφιξης', editable: true },
-  { key: 'epitropos', label: 'Επίτροπος', editable: true },
-  {
-    key: 'proposed',
-    label: 'Προτεινόμενη τάξη',
-    sortable: true,
-    sortAccessor: proposedSortValue,
-    render: (s) => `${s.computed_type} · ${s.computed_grade}`,
-  },
-]
 
 export default function Arrivals({ version, bump }) {
   const [students, setStudents] = useState([])
   const [bulkEnroll, setBulkEnroll] = useState(false)
   const [dikaDelete, setDikaDelete] = useState(false)
   const [manual, setManual] = useState(false)
+  const [promptOn, setPromptOn] = useState(true) // ρύθμιση: ερώτηση έκδοσης εγγράφων μετά την εγγραφή
+  const [enrolledForDocs, setEnrolledForDocs] = useState([]) // ερώτηση για αυτούς
+  const [docStudents, setDocStudents] = useState([]) // επιλογή εγγράφων για αυτούς
   const sel = useSelection()
 
   function load() {
@@ -42,9 +26,53 @@ export default function Arrivals({ version, bump }) {
   }
   useEffect(load, [version])
 
+  useEffect(() => {
+    api.getSettings().then((s) => setPromptOn(!s || s.enrollDocsPrompt !== '0'))
+  }, [])
+
+  async function toggleEpitropos(s) {
+    await api.updateStudent(s.id, { epitropos: s.epitropos === 'Ναι' ? 'Όχι' : 'Ναι' })
+    bump()
+  }
+
+  const columns = [
+    { key: 'eponymo', label: 'Επώνυμο', editable: true },
+    { key: 'onoma', label: 'Όνομα', editable: true },
+    { key: 'patronymo', label: 'Πατρώνυμο', editable: true },
+    { key: 'monada', label: 'Μονάδα', editable: true },
+    { key: 'dika', label: 'ΔΙΚΑ', editable: true },
+    { key: 'fylo', label: 'Φύλο', editable: true },
+    { key: 'imerominia_gennisis', label: 'Ημ. γέννησης', sortable: true, sortAccessor: birthSortValue, editable: true },
+    { key: 'ithageneia', label: 'Ιθαγένεια', editable: true },
+    { key: 'glossa', label: 'Γλώσσα', editable: true },
+    { key: 'imerominia_afixis', label: 'Ημ. άφιξης', editable: true },
+    {
+      key: 'epitropos',
+      label: 'Επίτροπος',
+      render: (s) => (
+        <button
+          onClick={() => toggleEpitropos(s)}
+          className={`rounded px-2 py-0.5 text-xs font-medium ${
+            s.epitropos === 'Ναι' ? 'bg-green-100 text-green-700' : 'bg-slate-100 text-slate-500'
+          }`}
+        >
+          {s.epitropos}
+        </button>
+      ),
+    },
+    {
+      key: 'proposed',
+      label: 'Προτεινόμενη τάξη',
+      sortable: true,
+      sortAccessor: proposedSortValue,
+      render: (s) => `${s.computed_type} · ${s.computed_grade}`,
+    },
+  ]
+
   async function enrollOne(s) {
     await api.enroll(s.id)
     bump()
+    if (promptOn) setEnrolledForDocs([s])
   }
 
   async function del(s) {
@@ -143,10 +171,13 @@ export default function Arrivals({ version, bump }) {
         <BulkEnrollModal
           ids={sel.ids}
           onClose={() => setBulkEnroll(false)}
-          onDone={() => {
+          onDone={(res) => {
             setBulkEnroll(false)
+            const enrolledIds = (res && res.enrolledIds) || []
+            const objs = students.filter((s) => enrolledIds.includes(s.id))
             sel.clear()
             bump()
+            if (promptOn && objs.length) setEnrolledForDocs(objs)
           }}
         />
       )}
@@ -166,6 +197,21 @@ export default function Arrivals({ version, bump }) {
           onClose={() => setManual(false)}
           onAdded={() => bump()}
         />
+      )}
+
+      {enrolledForDocs.length > 0 && (
+        <EnrollDocsPrompt
+          students={enrolledForDocs}
+          onClose={() => setEnrolledForDocs([])}
+          onYes={() => {
+            setDocStudents(enrolledForDocs)
+            setEnrolledForDocs([])
+          }}
+        />
+      )}
+
+      {docStudents.length > 0 && (
+        <BulkDocumentModal students={docStudents} onClose={() => setDocStudents([])} />
       )}
     </div>
   )

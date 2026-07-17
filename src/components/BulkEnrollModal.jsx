@@ -24,7 +24,7 @@ export default function BulkEnrollModal({ ids, onClose, onDone }) {
   }
 
   function close() {
-    if (result) onDone()
+    if (result) onDone(result)
     onClose()
   }
 

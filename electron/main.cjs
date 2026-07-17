@@ -918,6 +918,7 @@ ipcMain.handle('students:bulkEnroll', (_e, { ids = [], mode, schoolId }) => {
   let enrolled = 0 // εγγράφηκαν με σχολείο
   let needSchool = 0 // εγγράφηκαν αλλά χωρίς σχολείο (επιλογή αργότερα)
   const skipped = []
+  const enrolledIds = [] // όσοι όντως εγγράφηκαν (για ερώτηση έκδοσης εγγράφων μετά)
   for (const id of ids) {
     const rows = db.query('SELECT * FROM students WHERE id=$id', { $id: id })
     if (!rows.length) continue
@@ -942,10 +943,11 @@ ipcMain.handle('students:bulkEnroll', (_e, { ids = [], mode, schoolId }) => {
               current_grade=$g, enrolled_at=$now, updated_at=$now WHERE id=$id`,
       { $sid: target ? target.id : null, $g: cls.grade, $now: nowIso(), $id: id }
     )
+    enrolledIds.push(id)
     if (target) enrolled++
     else needSchool++
   }
-  return { ok: true, enrolled, needSchool, skipped }
+  return { ok: true, enrolled, needSchool, skipped, enrolledIds }
 })
 
 // ---- Προβιβασμός / νέο σχολικό έτος ---------------------------------------
@@ -1050,14 +1052,19 @@ ipcMain.handle('promotion:apply', (_e, promotedIds = []) => {
   return { ok: true, promoted, graduated, needSchool, yearStart, yearLabel: grades.schoolYearLabel(yearStart) }
 })
 
-ipcMain.handle('documents:bulkGenerate', async (_e, { ids = [], templateFiles = [], signee }) => {
+ipcMain.handle('documents:bulkGenerate', async (_e, { ids = [], templateFiles = [], signees, signee } = {}) => {
   if (!templateFiles.length) return { error: 'Δεν επιλέχθηκαν templates' }
   const { canceled, filePaths } = await dialog.showOpenDialog({
     title: 'Επιλογή φακέλου αποθήκευσης εγγράφων',
     properties: ['openDirectory', 'createDirectory'],
   })
   if (canceled || !filePaths.length) return { canceled: true }
-  const outDir = filePaths[0]
+  // Δομή εξόδου: <επιλεγμένος φάκελος>/Έγγραφα <ημ.>/<όνομα προτύπου>/Επώνυμο_Όνομα.pdf
+  const d = new Date()
+  const pad = (n) => String(n).padStart(2, '0')
+  const rootName = `Έγγραφα ${pad(d.getDate())}-${pad(d.getMonth() + 1)}-${d.getFullYear()}`
+  const outDir = path.join(filePaths[0], rootName)
+  const sanitize = (x) => String(x == null ? '' : x).replace(/[\\/:*?"<>|]+/g, '_').trim()
   const cfg = db.getAllSettings()
   let generated = 0
   const failed = []
@@ -1070,8 +1077,10 @@ ipcMain.handle('documents:bulkGenerate', async (_e, { ids = [], templateFiles = 
     if (!rows.length) continue
     const s = rows[0]
     const data = buildDocData(s, cfg)
-    if (signee) {
-      const sg = computeSignee(s, cfg, signee)
+    // Υπογράφων: ανά μαθητή (signees[id])· fallback σε κοινή επιλογή (signee) για συμβατότητα.
+    const choice = (signees && signees[id]) || signee || null
+    if (choice) {
+      const sg = computeSignee(s, cfg, choice)
       data['signee'] = sg.signee
       data['signee.prop'] = sg.prop
     }
@@ -1089,11 +1098,11 @@ ipcMain.handle('documents:bulkGenerate', async (_e, { ids = [], templateFiles = 
           isDev,
           userDataPath: app.getPath('userData'),
         })
-        const safe = `${s.eponymo}_${s.onoma}_${tf.replace(/\.(pptx|docx)$/i, '')}.pdf`.replace(
-          /[\\/:*?"<>|\s]+/g,
-          '_'
-        )
-        fs.copyFileSync(pdf, path.join(outDir, safe))
+        const tplName = sanitize(tf.replace(/\.(pptx|docx)$/i, '')) || 'Έγγραφα'
+        const subDir = path.join(outDir, tplName)
+        fs.mkdirSync(subDir, { recursive: true })
+        const safe = `${sanitize(`${s.eponymo}_${s.onoma}`).replace(/\s+/g, '_')}.pdf`
+        fs.copyFileSync(pdf, path.join(subDir, safe))
         generated++
       } catch (err) {
         failed.push(`${s.eponymo} ${s.onoma} / ${tf}: ${err.message}`)

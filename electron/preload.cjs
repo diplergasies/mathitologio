@@ -48,8 +48,8 @@ contextBridge.exposeInMainWorld('api', {
 
   promotionPreview: () => ipcRenderer.invoke('promotion:preview'),
   applyPromotion: (ids) => ipcRenderer.invoke('promotion:apply', ids),
-  bulkGenerate: (ids, templateFiles, signee) =>
-    ipcRenderer.invoke('documents:bulkGenerate', { ids, templateFiles, signee }),
+  bulkGenerate: (ids, templateFiles, signees) =>
+    ipcRenderer.invoke('documents:bulkGenerate', { ids, templateFiles, signees }),
 
   exportBackup: () => ipcRenderer.invoke('backup:export'),
   importBackup: () => ipcRenderer.invoke('backup:import'),

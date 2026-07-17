@@ -188,7 +188,12 @@ export default function Students({ version, bump }) {
       />
 
       {docFor && <DocumentModal student={docFor} onClose={() => setDocFor(null)} />}
-      {bulkDoc && <BulkDocumentModal ids={sel.ids} onClose={() => setBulkDoc(false)} />}
+      {bulkDoc && (
+        <BulkDocumentModal
+          students={students.filter((s) => sel.ids.includes(s.id))}
+          onClose={() => setBulkDoc(false)}
+        />
+      )}
 
       {delFor && (
         <DeleteReasonModal
