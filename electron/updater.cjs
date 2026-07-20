@@ -97,7 +97,12 @@ function wire() {
     log.info('updater: σοβαρότητα =', severity)
     if (severity === 'major') {
       majorFlow = false // παραμένει false μέχρι το «Λήψη» — δεν κατεβάζουμε ακόμη
-      send({ state: 'available', importance: 'major', version: info.version })
+      // Το banner εμφανίζεται ΜΟΝΟ αν ο χρήστης δεν έχει σιγήσει τις ειδοποιήσεις σημαντικών.
+      if (isEnabled()) {
+        send({ state: 'available', importance: 'major', version: info.version })
+      } else {
+        log.info('updater: σημαντική ενημέρωση διαθέσιμη αλλά οι ειδοποιήσεις είναι OFF — σιωπή')
+      }
     } else if (!silentDownloading) {
       // Σιωπηλή: κατέβασε στο παρασκήνιο· η εγκατάσταση γίνεται στο κλείσιμο.
       silentDownloading = true
@@ -176,13 +181,12 @@ function init(winGetter, enabledGetter) {
 }
 
 // force=true → χειροκίνητος έλεγχος (αγνοεί τον διακόπτη «Αυτόματες ενημερώσεις»).
+// Ο έλεγχος τρέχει ΠΑΝΤΑ (ακόμη κι αν ο διακόπτης είναι off) — έτσι οι σιωπηλές
+// ενημερώσεις εφαρμόζονται πάντα. Ο διακόπτης αφορά ΜΟΝΟ την ειδοποίηση (banner) για
+// σημαντικές ενημερώσεις (βλ. update-available).
 function checkNow(force) {
   if (!started) {
     log.info('updater: checkNow αλλά ο updater δεν είναι ενεργός')
-    return
-  }
-  if (!force && !isEnabled()) {
-    log.info('updater: αυτόματος έλεγχος απενεργοποιημένος (διακόπτης) — παράλειψη')
     return
   }
   log.info('updater: checkNow (force =', !!force, ')')
