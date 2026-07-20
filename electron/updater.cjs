@@ -13,6 +13,19 @@
 // ---------------------------------------------------------------------------
 
 const { autoUpdater } = require('electron-updater')
+const log = require('electron-log/main')
+
+// Καταγραφή σε αρχείο (updater.log μέσα στο φάκελο logs του userData) — ώστε κάθε
+// ενημέρωση να αφήνει ίχνος: ανίχνευση, σοβαρότητα, MB/ποσοστό λήψης (delta vs πλήρες),
+// εγκατάσταση στο κλείσιμο και σφάλματα. Χωρίς αυτό, προβλήματα σαν το κενό token είναι
+// αόρατα.
+try {
+  log.transports.file.level = 'info'
+  log.transports.console.level = 'info'
+  log.transports.file.fileName = 'updater.log'
+} catch (_e) {
+  /* no-op */
+}
 
 const isDev = !!process.env.VITE_DEV_SERVER_URL
 
@@ -67,44 +80,65 @@ async function resolveSeverity() {
 }
 
 function wire() {
+  autoUpdater.on('checking-for-update', () => log.info('updater: έλεγχος για ενημέρωση…'))
+  autoUpdater.on('update-not-available', (info) =>
+    log.info('updater: καμία ενημέρωση (τρέχουσα =', info && info.version, ')')
+  )
+
   autoUpdater.on('update-available', async (info) => {
+    log.info('updater: βρέθηκε έκδοση', info && info.version)
     // Αν έχει ήδη ξεκινήσει λήψη (σημαντική ή σιωπηλή), αγνόησε επαναλαμβανόμενες ειδοποιήσεις
     // από τους περιοδικούς ελέγχους — αλλιώς θα «επανερχόταν» το banner ενώ κατεβαίνει.
-    if (majorFlow || silentDownloading) return
+    if (majorFlow || silentDownloading) {
+      log.info('updater: λήψη ήδη σε εξέλιξη — αγνοώ')
+      return
+    }
     const severity = await resolveSeverity()
+    log.info('updater: σοβαρότητα =', severity)
     if (severity === 'major') {
       majorFlow = false // παραμένει false μέχρι το «Λήψη» — δεν κατεβάζουμε ακόμη
       send({ state: 'available', importance: 'major', version: info.version })
     } else if (!silentDownloading) {
       // Σιωπηλή: κατέβασε στο παρασκήνιο· η εγκατάσταση γίνεται στο κλείσιμο.
       silentDownloading = true
-      autoUpdater.downloadUpdate().catch((e) => console.error('updater: silent download', e))
+      log.info('updater: σιωπηλή λήψη ξεκίνησε στο παρασκήνιο')
+      autoUpdater.downloadUpdate().catch((e) => log.error('updater: silent download', e))
     }
   })
 
   autoUpdater.on('download-progress', (p) => {
+    // Πραγματικά bytes δικτύου: σε differential (delta) λήψη το transferred/total είναι
+    // πολύ μικρότερα από το πλήρες installer.
+    log.info(
+      `updater: λήψη ${Math.round(p.percent || 0)}% — ${(p.transferred / 1048576).toFixed(1)}/${(
+        p.total / 1048576
+      ).toFixed(1)} MB @ ${((p.bytesPerSecond || 0) / 1048576).toFixed(2)} MB/s`
+    )
     if (majorFlow) {
       send({ state: 'downloading', importance: 'major', percent: Math.round(p.percent || 0) })
     }
   })
 
   autoUpdater.on('update-downloaded', (info) => {
+    log.info('updater: η λήψη ολοκληρώθηκε —', info && info.version, majorFlow ? '(major)' : '(silent)')
     if (majorFlow) {
       send({ state: 'downloaded', importance: 'major', version: info.version })
       // Μικρή καθυστέρηση ώστε να προλάβει να ζωγραφιστεί το UI, μετά αυτόματη επανεκκίνηση.
       setTimeout(() => {
         try {
+          log.info('updater: quitAndInstall (major)')
           autoUpdater.quitAndInstall(true, true) // σιωπηλή εγκατάσταση + επανεκκίνηση
         } catch (e) {
-          console.error('updater: quitAndInstall', e)
+          log.error('updater: quitAndInstall', e)
         }
       }, 1200)
+    } else {
+      log.info('updater: σιωπηλή — θα εγκατασταθεί στο επόμενο κλείσιμο (autoInstallOnAppQuit)')
     }
-    // Σιωπηλή: δεν κάνουμε τίποτα — το autoInstallOnAppQuit εγκαθιστά στο κλείσιμο.
   })
 
   autoUpdater.on('error', (err) => {
-    console.error('updater: error', err && err.message ? err.message : err)
+    log.error('updater: ΣΦΑΛΜΑ', err && err.stack ? err.stack : err)
   })
 }
 
@@ -113,16 +147,18 @@ function init(winGetter, enabledGetter) {
   isEnabled = typeof enabledGetter === 'function' ? enabledGetter : () => true
 
   if (isDev) {
-    console.log('updater: παράλειψη (dev)')
+    log.info('updater: παράλειψη (dev)')
     return
   }
   if (!TOKEN) {
-    console.log('updater: χωρίς token — ανενεργό')
+    log.warn('updater: ΧΩΡΙΣ TOKEN — ανενεργό (το secret UPDATE_READ_TOKEN είναι κενό;)')
     return
   }
   if (started) return
   started = true
 
+  autoUpdater.logger = log
+  log.info('updater: init — token OK (μήκος', TOKEN.length, '), ενεργός')
   process.env.GH_TOKEN = TOKEN
   autoUpdater.autoDownload = false
   autoUpdater.autoInstallOnAppQuit = true
@@ -141,17 +177,25 @@ function init(winGetter, enabledGetter) {
 
 // force=true → χειροκίνητος έλεγχος (αγνοεί τον διακόπτη «Αυτόματες ενημερώσεις»).
 function checkNow(force) {
-  if (!started) return
-  if (!force && !isEnabled()) return
-  autoUpdater.checkForUpdates().catch((e) => console.error('updater: checkForUpdates', e))
+  if (!started) {
+    log.info('updater: checkNow αλλά ο updater δεν είναι ενεργός')
+    return
+  }
+  if (!force && !isEnabled()) {
+    log.info('updater: αυτόματος έλεγχος απενεργοποιημένος (διακόπτης) — παράλειψη')
+    return
+  }
+  log.info('updater: checkNow (force =', !!force, ')')
+  autoUpdater.checkForUpdates().catch((e) => log.error('updater: checkForUpdates', e))
 }
 
 // Ενεργοποιείται από το «Λήψη» του banner (μόνο σημαντικές ενημερώσεις).
 function startDownload() {
   if (!started) return
   majorFlow = true
+  log.info('updater: ο χρήστης πάτησε «Λήψη» — ξεκινά λήψη σημαντικής ενημέρωσης')
   send({ state: 'downloading', importance: 'major', percent: 0 })
-  autoUpdater.downloadUpdate().catch((e) => console.error('updater: startDownload', e))
+  autoUpdater.downloadUpdate().catch((e) => log.error('updater: startDownload', e))
 }
 
 function getState() {
