@@ -68,12 +68,15 @@ jobs:
         env:
           COMMIT_MSG: ${{ github.event.head_commit.message }}
         run: |
+          # ΜΟΝΟ η πρώτη γραμμή (subject) του commit ελέγχεται για ετικέτα — ώστε τυχαία
+          # αναφορά [major]/[silent] στο σώμα της περιγραφής να ΜΗΝ πυροδοτεί λάθος σοβαρότητα.
           $msg = "$env:COMMIT_MSG"
-          if ($msg -match '\[major\]') { $sev = '[major]' }
-          elseif ($msg -match '\[silent\]') { $sev = '[silent]' }
+          $subject = ($msg -split "`n")[0].Trim()
+          if ($subject -match '\[major\]') { $sev = '[major]' }
+          elseif ($subject -match '\[silent\]') { $sev = '[silent]' }
           else { $sev = '[silent]' } # προεπιλογή: σιωπηλή
           "severity=$sev" | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8
-          Write-Host "Σοβαρότητα ενημέρωσης: $sev"
+          Write-Host "Subject: $subject  ->  Σοβαρότητα: $sev"
 
       - name: Build Windows installer (.exe)
         run: npm run build && npx electron-builder --win --publish never
