@@ -4,7 +4,8 @@ import { DownloadCloud, X, Loader2 } from 'lucide-react'
 // Μένει ορατή μέχρι ο χρήστης να πατήσει «Λήψη» ή «×».
 export default function UpdateBanner({ state, onDownload, onDismiss }) {
   const phase = state?.state
-  const version = state?.version
+  // Ορατή έκδοση = μόνο major.minor (ίδιο σκεπτικό με το header).
+  const version = state?.version ? String(state.version).split('.').slice(0, 2).join('.') : ''
   const percent = state?.percent ?? 0
 
   return (
@@ -23,7 +24,7 @@ export default function UpdateBanner({ state, onDownload, onDismiss }) {
             <DownloadCloud size={14} /> Λήψη
           </button>
           <button
-            onClick={() => onDismiss(version)}
+            onClick={() => onDismiss(state?.version)}
             title="Απόκρυψη"
             className="rounded p-1 text-blue-500 hover:bg-blue-100"
           >

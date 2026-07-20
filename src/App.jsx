@@ -13,6 +13,10 @@ import EmailPromptModal from './components/EmailPromptModal'
 import UpdateBanner from './components/UpdateBanner'
 import { Upload, FileText, Download, Database, PlaneLanding, Users, Trash2, Settings as SettingsIcon, BarChart3, ClipboardList, CalendarDays, BookOpen, HelpCircle } from 'lucide-react'
 
+// Ορατή στον χρήστη έκδοση = μόνο major.minor (π.χ. «1.6»). Οι σιωπηλές ενημερώσεις αυξάνουν
+// μόνο το 3ο ψηφίο, ώστε ο χρήστης να ΜΗ βλέπει αλλαγή· η πλήρης έκδοση μένει στις Ρυθμίσεις.
+const shortVer = (v) => (v ? String(v).split('.').slice(0, 2).join('.') : '')
+
 const TABS = [
   { id: 'arrivals', label: 'Αφίξεις', icon: PlaneLanding, Comp: Arrivals },
   { id: 'students', label: 'Μαθητές', icon: Users, Comp: Students },
@@ -223,7 +227,7 @@ export default function App() {
             <h1 className="text-lg font-bold leading-tight text-slate-800">Μαθητολόγιο ΣΕΠ</h1>
             {info && (
               <p className="text-xs text-slate-400">
-                Σχολικό έτος {info.schoolYearLabel} · έκδοση {info.version}
+                Σχολικό έτος {info.schoolYearLabel} · έκδοση {shortVer(info.version)}
               </p>
             )}
           </div>

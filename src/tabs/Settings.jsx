@@ -799,8 +799,9 @@ function UpdateSection() {
         <RefreshCw size={18} /> Ενημερώσεις
       </h3>
       <p className="mb-3 text-xs text-slate-400">
-        Τρέχουσα έκδοση: {ver || '—'}. Οι σημαντικές ενημερώσεις εμφανίζουν ειδοποίηση με κουμπί
-        «Λήψη»· οι μικρές εγκαθίστανται αυτόματα στο παρασκήνιο.
+        Πλήρης έκδοση: {ver || '—'} (στην κορυφή φαίνεται μόνο η κύρια έκδοση). Οι σημαντικές
+        ενημερώσεις εμφανίζουν ειδοποίηση με κουμπί «Λήψη»· οι μικρές εγκαθίστανται αυτόματα στο
+        παρασκήνιο, χωρίς αλλαγή της κύριας έκδοσης.
       </p>
       <label className="mb-3 flex items-center gap-2 text-sm text-slate-600">
         <input type="checkbox" checked={auto} onChange={(e) => toggleAuto(e.target.checked)} />
