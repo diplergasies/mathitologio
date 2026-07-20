@@ -9,6 +9,7 @@ const grades = require('./grades.cjs')
 const importer = require('./importer.cjs')
 const documents = require('./documents.cjs')
 const mail = require('./mail.cjs')
+const updater = require('./updater.cjs')
 
 const isDev = !!process.env.VITE_DEV_SERVER_URL
 
@@ -155,6 +156,8 @@ function computeSignee(s, cfg, choice) {
   }
 }
 
+let mainWindow = null
+
 function createWindow() {
   const win = new BrowserWindow({
     width: 1280,
@@ -173,6 +176,10 @@ function createWindow() {
   })
 
   win.setMenuBarVisibility(false)
+  mainWindow = win
+  win.on('closed', () => {
+    if (mainWindow === win) mainWindow = null
+  })
 
   // Εκκίνηση με μεγιστοποιημένο παράθυρο.
   win.once('ready-to-show', () => {
@@ -1414,6 +1421,11 @@ ipcMain.handle('backup:chooseFolder', async () => {
 
 ipcMain.handle('backup:now', () => runAutoBackup({ force: true }))
 
+// ---- Αυτόματες ενημερώσεις (πειραματικό) ---------------------------------
+ipcMain.handle('update:check', () => updater.checkNow(true)) // χειροκίνητος έλεγχος
+ipcMain.handle('update:download', () => updater.startDownload()) // «Λήψη» σημαντικής
+ipcMain.handle('update:getState', () => updater.getState())
+
 ipcMain.handle('backup:list', () => {
   const folder = db.getAllSettings().backupFolder || ''
   if (!folder || !fs.existsSync(folder)) return []
@@ -1717,6 +1729,15 @@ app.whenReady().then(async () => {
     runAutoBackup()
   } catch (e) {
     console.error('auto-backup', e)
+  }
+  // Αυτόματες ενημερώσεις (πειραματικό): έλεγχος στην εκκίνηση + περιοδικά.
+  try {
+    updater.init(
+      () => mainWindow,
+      () => db.getAllSettings().update_auto !== 'off'
+    )
+  } catch (e) {
+    console.error('updater init', e)
   }
   app.on('activate', () => {
     if (BrowserWindow.getAllWindows().length === 0) createWindow()

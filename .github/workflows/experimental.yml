@@ -54,6 +54,27 @@ jobs:
           if (!(Test-Path "resources\libreoffice\program\soffice.exe")) { throw "Αποτυχία αντιγραφής LibreOffice" }
           Write-Host "Bundled soffice:" (Resolve-Path "resources\libreoffice\program\soffice.exe").Path
 
+      - name: Inject update token (read-only PAT για auto-update private repo)
+        shell: pwsh
+        env:
+          UPDATE_READ_TOKEN: ${{ secrets.UPDATE_READ_TOKEN }}
+        run: |
+          Set-Content -Path electron/updateToken.cjs -Value ("module.exports = '" + $env:UPDATE_READ_TOKEN + "'") -Encoding utf8
+          Write-Host "Έγραψα electron/updateToken.cjs (μήκος token:" $env:UPDATE_READ_TOKEN.Length ")"
+
+      - name: Determine update severity (από το μήνυμα του commit)
+        id: sev
+        shell: pwsh
+        env:
+          COMMIT_MSG: ${{ github.event.head_commit.message }}
+        run: |
+          $msg = "$env:COMMIT_MSG"
+          if ($msg -match '\[major\]') { $sev = '[major]' }
+          elseif ($msg -match '\[silent\]') { $sev = '[silent]' }
+          else { $sev = '[silent]' } # προεπιλογή: σιωπηλή
+          "severity=$sev" | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8
+          Write-Host "Σοβαρότητα ενημέρωσης: $sev"
+
       - name: Build Windows installer (.exe)
         run: npm run build && npx electron-builder --win --publish never
 
@@ -62,9 +83,15 @@ jobs:
         with:
           tag_name: exp-latest
           name: Πειραματική έκδοση (τελευταία)
-          body: Ιδιωτικό build του κλάδου experimental. Κατέβασε το `Mathitologio-EXP-Setup-*.exe` παρακάτω.
+          # Η ετικέτα severity διαβάζεται από την εφαρμογή (updater.cjs → resolveSeverity).
+          body: |
+            Ιδιωτικό build του κλάδου experimental. severity: ${{ steps.sev.outputs.severity }}
+            Κατέβασε το `Mathitologio-EXP-Setup-*.exe` παρακάτω.
           prerelease: true
           make_latest: false
-          files: release/Mathitologio-EXP-Setup-*.exe
+          files: |
+            release/Mathitologio-EXP-Setup-*.exe
+            release/Mathitologio-EXP-Setup-*.exe.blockmap
+            release/latest.yml
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

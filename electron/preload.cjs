@@ -79,4 +79,14 @@ contextBridge.exposeInMainWorld('api', {
   mailClearCredentials: () => ipcRenderer.invoke('mail:clearCredentials'),
   mailCheck: () => ipcRenderer.invoke('mail:check'),
   mailImportMessage: (id) => ipcRenderer.invoke('mail:import', id),
+
+  // Αυτόματες ενημερώσεις (πειραματικό).
+  updateCheck: () => ipcRenderer.invoke('update:check'),
+  updateDownload: () => ipcRenderer.invoke('update:download'),
+  updateGetState: () => ipcRenderer.invoke('update:getState'),
+  onUpdateStatus: (cb) => {
+    const h = (_e, data) => cb(data)
+    ipcRenderer.on('update:status', h)
+    return () => ipcRenderer.removeListener('update:status', h)
+  },
 })

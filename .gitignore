@@ -19,3 +19,6 @@ samples/
 
 *.log
 .DS_Store
+
+# Read-only token ενημερώσεων — γράφεται από το CI κατά το build, ΠΟΤΕ στο git
+electron/updateToken.cjs

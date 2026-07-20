@@ -770,6 +770,55 @@ function EmailImportSection({ emailCheck, onEmailConfigChange }) {
   )
 }
 
+// Ενότητα ενημερώσεων (πειραματικό): τρέχουσα έκδοση, διακόπτης αυτόματου ελέγχου, «Έλεγχος τώρα».
+function UpdateSection() {
+  const [ver, setVer] = useState('')
+  const [auto, setAuto] = useState(true)
+  const [msg, setMsg] = useState('')
+
+  useEffect(() => {
+    api.appInfo().then((i) => i && setVer(i.version || ''))
+    api.getSettings().then((s) => setAuto(!s || s.update_auto !== 'off'))
+  }, [])
+
+  async function toggleAuto(v) {
+    setAuto(v)
+    await api.setSettings({ update_auto: v ? 'on' : 'off' })
+  }
+
+  async function checkNow() {
+    setMsg('Έλεγχος…')
+    await api.updateCheck()
+    setMsg('Έγινε έλεγχος. Αν υπάρχει σημαντική ενημέρωση θα εμφανιστεί ειδοποίηση.')
+    setTimeout(() => setMsg(''), 6000)
+  }
+
+  return (
+    <div className="rounded-lg border border-slate-200 bg-white p-4">
+      <h3 className="mb-1 flex items-center gap-2 font-semibold text-slate-700">
+        <RefreshCw size={18} /> Ενημερώσεις
+      </h3>
+      <p className="mb-3 text-xs text-slate-400">
+        Τρέχουσα έκδοση: {ver || '—'}. Οι σημαντικές ενημερώσεις εμφανίζουν ειδοποίηση με κουμπί
+        «Λήψη»· οι μικρές εγκαθίστανται αυτόματα στο παρασκήνιο.
+      </p>
+      <label className="mb-3 flex items-center gap-2 text-sm text-slate-600">
+        <input type="checkbox" checked={auto} onChange={(e) => toggleAuto(e.target.checked)} />
+        Αυτόματος έλεγχος ενημερώσεων
+      </label>
+      <div className="flex items-center gap-3">
+        <button
+          onClick={checkNow}
+          className="inline-flex items-center gap-1.5 rounded-md border border-slate-300 px-3 py-2 text-sm text-slate-600 hover:bg-slate-50"
+        >
+          <RefreshCw size={16} /> Έλεγχος τώρα
+        </button>
+        {msg && <span className="text-sm text-slate-500">{msg}</span>}
+      </div>
+    </div>
+  )
+}
+
 export default function Settings({ version, bump, emailCheck, onEmailConfigChange }) {
   const [form, setForm] = useState({ sep: '', nomos: '', domi: '', perif: '' })
   const [saved, setSaved] = useState(false)
@@ -850,6 +899,8 @@ export default function Settings({ version, bump, emailCheck, onEmailConfigChang
       <EmailImportSection emailCheck={emailCheck} onEmailConfigChange={onEmailConfigChange} />
 
       <BackupSection />
+
+      <UpdateSection />
 
       <TemplatesSection />
 

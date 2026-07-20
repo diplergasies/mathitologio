@@ -10,6 +10,7 @@ import Calendar from './tabs/Calendar'
 import HelpModal from './components/HelpModal'
 import DepartureDetectionModal from './components/DepartureDetectionModal'
 import EmailPromptModal from './components/EmailPromptModal'
+import UpdateBanner from './components/UpdateBanner'
 import { Upload, FileText, Download, Database, PlaneLanding, Users, Trash2, Settings as SettingsIcon, BarChart3, ClipboardList, CalendarDays, BookOpen, HelpCircle } from 'lucide-react'
 
 const TABS = [
@@ -34,6 +35,8 @@ export default function App() {
   const [emailTick, setEmailTick] = useState(0) // αλλαγές ρυθμίσεων e-mail → επαναρύθμιση poller
   const emailTimerRef = useRef(null)
   const handledUidRef = useRef(null) // uid που ήδη εισήχθη ή απορρίφθηκε (να μη ξαναρωτά)
+  const [updateState, setUpdateState] = useState(null) // { state, importance, version, percent }
+  const updateDismissedRef = useRef(null) // έκδοση που ο χρήστης απέκρυψε (να μη ξαναενοχλεί)
 
   const bump = () => setVersion((v) => v + 1)
 
@@ -49,6 +52,34 @@ export default function App() {
   useEffect(() => {
     api.appInfo().then(setInfo)
   }, [version])
+
+  // ---- Αυτόματες ενημερώσεις (πειραματικό) ---------------------------------
+  // Μόνο οι «σημαντικές» φτάνουν εδώ (banner)· οι σιωπηλές γίνονται αόρατα στο main.
+  function applyUpdate(st) {
+    if (!st) return
+    if (st.state === 'available' && st.version && st.version === updateDismissedRef.current) return
+    setUpdateState(st)
+  }
+  useEffect(() => {
+    // Η απόκρυψη του banner είναι πλέον ΜΟΝΟ για την τρέχουσα συνεδρία (δεν διαβάζουμε
+    // αποθηκευμένη έκδοση): στο επόμενο άνοιγμα το startup check ξαναβρίσκει τη σημαντική
+    // ενημέρωση και το banner επανεμφανίζεται μέχρι ο χρήστης να πατήσει «Λήψη».
+    api.updateGetState().then((st) => {
+      if (st && st.state !== 'idle') applyUpdate(st)
+    })
+    const unsub = api.onUpdateStatus(applyUpdate)
+    return () => {
+      if (typeof unsub === 'function') unsub()
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [])
+
+  // Απόκρυψη μόνο για την τρέχουσα συνεδρία (in-memory): εμποδίζει επανεμφάνιση από τον
+  // περιοδικό έλεγχο εντός της ίδιας εκτέλεσης, αλλά χάνεται στην επανεκκίνηση.
+  function dismissUpdate(v) {
+    updateDismissedRef.current = v
+    setUpdateState(null)
+  }
 
   function showToast(text, type = 'ok') {
     setToast({ text, type })
@@ -178,6 +209,13 @@ export default function App() {
 
   return (
     <div className="flex h-full flex-col">
+      {updateState && updateState.importance === 'major' && (
+        <UpdateBanner
+          state={updateState}
+          onDownload={() => api.updateDownload()}
+          onDismiss={dismissUpdate}
+        />
+      )}
       <header className="flex items-center justify-between border-b border-slate-200 bg-white px-5 py-3">
         <div className="flex items-center gap-2">
           <BookOpen className="text-blue-600" size={22} />
