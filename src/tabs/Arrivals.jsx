@@ -93,6 +93,12 @@ export default function Arrivals({ version, bump }) {
     bump()
   }
 
+  async function applyColor(ids, color) {
+    await api.setStudentColor(ids, color)
+    sel.clear()
+    bump()
+  }
+
   return (
     <div>
       <div className="mb-3 flex items-center justify-between gap-3">
@@ -147,6 +153,7 @@ export default function Arrivals({ version, bump }) {
         onToggle={sel.toggle}
         onToggleAll={sel.toggleAll}
         onCellSave={saveCell}
+        onSetColor={applyColor}
         renderActions={(s) => (
           <>
             <button

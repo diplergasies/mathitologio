@@ -47,6 +47,12 @@ export default function Students({ version, bump }) {
     bump()
   }
 
+  async function applyColor(ids, color) {
+    await api.setStudentColor(ids, color)
+    sel.clear()
+    bump()
+  }
+
   const columns = [
     { key: 'eponymo', label: 'Επώνυμο', editable: true },
     { key: 'onoma', label: 'Όνομα', editable: true },
@@ -167,6 +173,7 @@ export default function Students({ version, bump }) {
         onToggle={sel.toggle}
         onToggleAll={sel.toggleAll}
         onCellSave={saveCell}
+        onSetColor={applyColor}
         renderActions={(s) => (
           <>
             <button

@@ -650,6 +650,19 @@ ipcMain.handle('students:update', (_e, { id, fields }) => {
   return { ok: true }
 })
 
+// Χειροκίνητος χρωματικός κωδικός (color code) σε έναν ή περισσότερους μαθητές. color =
+// hex string (π.χ. '#fca5a5') ή null/κενό για καθαρισμό. Τα ids φιλτράρονται σε ακέραιους
+// (χωρίς SQL injection). Χρησιμοποιείται για διάκριση μαθητών ανά ΣΕΠ στην ίδια δομή.
+ipcMain.handle('students:setColor', (_e, { ids, color } = {}) => {
+  const list = (Array.isArray(ids) ? ids : []).map(Number).filter(Number.isInteger)
+  if (!list.length) return { ok: true }
+  const ph = list.map((_x, i) => `$i${i}`).join(',')
+  const params = { $c: color ? String(color) : null, $now: nowIso() }
+  list.forEach((id, i) => (params[`$i${i}`] = id))
+  db.run(`UPDATE students SET color_code=$c, updated_at=$now WHERE id IN (${ph})`, params)
+  return { ok: true }
+})
+
 // ---- Ημερολόγιο -----------------------------------------------------------
 // Ενοποιημένη λίστα γεγονότων: χειροκίνητες σημειώσεις (πίνακας calendar_notes) +
 // αυτόματα γεγονότα μαθητών (άφιξη/εγγραφή/διαγραφή), παραγόμενα δυναμικά.

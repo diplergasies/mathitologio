@@ -95,6 +95,9 @@ async function init(userDataDir) {
   ensureColumn('students', 'asynodeftos', "TEXT NOT NULL DEFAULT 'Όχι'")
   ensureColumn('students', 'eidiki_agogi', "TEXT NOT NULL DEFAULT 'Όχι'")
   ensureColumn('students', 'deletion_reason', 'TEXT')
+  // Χειροκίνητος χρωματικός κωδικός γραμμής (color code) ανά μαθητή — ώστε διαφορετικοί
+  // ΣΕΠ στην ίδια δομή να ξεχωρίζουν τους μαθητές τους. Αποθηκεύεται ως hex ή NULL.
+  ensureColumn('students', 'color_code', 'TEXT')
   // Backfill: παλαιότεροι εγγεγραμμένοι χωρίς enrolled_at -> updated_at/created_at (καλύτερη εκτίμηση).
   db.run(
     `UPDATE students SET enrolled_at = COALESCE(updated_at, created_at)

@@ -1,6 +1,6 @@
 import { useMemo, useRef, useState } from 'react'
-import { ArrowDown, ArrowUp, ChevronsUpDown, Search, X } from 'lucide-react'
-import { batchColor } from '../colors'
+import { ArrowDown, ArrowUp, ChevronsUpDown, Search, X, Palette } from 'lucide-react'
+import { batchColor, CODE_COLORS } from '../colors'
 import { fold, studentHaystack, matchSegments } from '../search'
 
 // Γενικός πίνακας μαθητών με χρωματισμό ανά batch, ταξινόμηση, αναζήτηση & επιλογή (checkboxes).
@@ -23,6 +23,7 @@ export default function StudentTable({
   onToggle,
   onToggleAll,
   onCellSave,
+  onSetColor,
 }) {
   const [sort, setSort] = useState(null) // { key, dir: 'asc'|'desc' }
   const [q, setQ] = useState('')
@@ -147,7 +148,7 @@ export default function StudentTable({
   }
 
   const searchBox = searchable ? (
-    <div className="relative mb-3 max-w-sm">
+    <div className="relative w-full max-w-sm">
       <Search size={15} className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" />
       <input
         value={q}
@@ -165,11 +166,47 @@ export default function StudentTable({
           <X size={15} />
         </button>
       )}
-      {term && (
-        <span className="ml-2 align-middle text-xs text-slate-500">{processed.length} αποτελέσματα</span>
-      )}
     </div>
   ) : null
+
+  // «Color code»: εμφανίζεται δεξιά από την Εύρεση μόνο όταν υπάρχει τουλάχιστον ένας
+  // επιλεγμένος μαθητής. Κάθε χρώμα βάφει τη γραμμή των επιλεγμένων· το «X» καθαρίζει.
+  const colorControl =
+    onSetColor && selectedIds.length > 0 ? (
+      <div className="flex items-center gap-1.5 rounded-md border border-slate-200 bg-white px-2.5 py-1.5">
+        <Palette size={15} className="text-slate-500" />
+        <span className="mr-0.5 text-xs font-medium text-slate-500">Color code</span>
+        {CODE_COLORS.map((c) => (
+          <button
+            key={c}
+            type="button"
+            onClick={() => onSetColor(selectedIds, c)}
+            title="Χρωματισμός επιλεγμένων"
+            className="h-5 w-5 rounded-full border border-slate-300 transition hover:scale-110"
+            style={{ backgroundColor: c }}
+          />
+        ))}
+        <button
+          type="button"
+          onClick={() => onSetColor(selectedIds, null)}
+          title="Καθαρισμός χρώματος"
+          className="flex h-5 w-5 items-center justify-center rounded-full border border-slate-300 text-slate-400 hover:bg-slate-100 hover:text-slate-600"
+        >
+          <X size={13} />
+        </button>
+      </div>
+    ) : null
+
+  const toolbar =
+    searchBox || colorControl ? (
+      <div className="mb-3 flex flex-wrap items-center gap-3">
+        {searchBox}
+        {colorControl}
+        {term && (
+          <span className="text-xs text-slate-500">{processed.length} αποτελέσματα</span>
+        )}
+      </div>
+    ) : null
 
   if (!students.length) {
     return (
@@ -202,7 +239,7 @@ export default function StudentTable({
 
   return (
     <div>
-      {searchBox}
+      {toolbar}
 
       {processed.length === 0 ? (
         <div className="rounded-lg border border-dashed border-slate-300 bg-white p-8 text-center text-slate-400">
@@ -262,11 +299,14 @@ export default function StudentTable({
               {processed.map((s) => {
                 const color = batchColor(s.batch_color)
                 const isSel = selected.has(s.id)
+                // Ο χειροκίνητος «color code» υπερισχύει του batch χρώματος· η μπλε
+                // επισήμανση επιλογής υπερισχύει και των δύο όσο η γραμμή είναι επιλεγμένη.
+                const rowBg = isSel ? '#dbeafe' : s.color_code || color.bg
                 return (
                   <tr
                     key={s.id}
                     className="border-t border-slate-100"
-                    style={{ backgroundColor: isSel ? '#dbeafe' : color.bg }}
+                    style={{ backgroundColor: rowBg }}
                   >
                     {selectable && (
                       <td className="px-3 py-2">

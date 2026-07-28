@@ -15,3 +15,16 @@ export function batchColor(colorIndex) {
   const i = ((Number(colorIndex) || 0) % BATCH_COLORS.length + BATCH_COLORS.length) % BATCH_COLORS.length
   return BATCH_COLORS[i]
 }
+
+// Χειροκίνητη παλέτα «color code» (6 χρώματα) που δίνει ο χρήστης στις γραμμές μαθητών
+// ώστε διαφορετικοί ΣΕΠ στην ίδια δομή να τους ξεχωρίζουν. Πιο κορεσμένα από τα batch
+// χρώματα (για να ξεχωρίζουν καθαρά) αλλά αρκετά ανοιχτά ώστε να αντιθέτουν με το σκούρο
+// κείμενο (slate-700) των πινάκων.
+export const CODE_COLORS = [
+  '#fca5a5', // κόκκινο
+  '#fdba74', // πορτοκαλί
+  '#fde047', // κίτρινο
+  '#86efac', // πράσινο
+  '#7dd3fc', // γαλάζιο
+  '#c4b5fd', // μωβ
+]

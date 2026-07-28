@@ -17,6 +17,7 @@ contextBridge.exposeInMainWorld('api', {
   deleteStudent: (id, reason) => ipcRenderer.invoke('students:delete', { id, reason }),
   restoreStudent: (id) => ipcRenderer.invoke('students:restore', id),
   updateStudent: (id, fields) => ipcRenderer.invoke('students:update', { id, fields }),
+  setStudentColor: (ids, color) => ipcRenderer.invoke('students:setColor', { ids, color }),
 
   listSchools: () => ipcRenderer.invoke('schools:list'),
   addSchool: (name, type, dyep, ty) => ipcRenderer.invoke('schools:add', { name, type, dyep, ty }),
