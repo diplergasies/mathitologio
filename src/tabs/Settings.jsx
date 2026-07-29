@@ -772,12 +772,10 @@ function EmailImportSection({ emailCheck, onEmailConfigChange }) {
 
 // Ενότητα ενημερώσεων (πειραματικό): τρέχουσα έκδοση, διακόπτης αυτόματου ελέγχου, «Έλεγχος τώρα».
 function UpdateSection() {
-  const [ver, setVer] = useState('')
   const [auto, setAuto] = useState(true)
   const [msg, setMsg] = useState('')
 
   useEffect(() => {
-    api.appInfo().then((i) => i && setVer(i.version || ''))
     api.getSettings().then((s) => setAuto(!s || s.update_auto !== 'off'))
   }, [])
 
@@ -795,15 +793,9 @@ function UpdateSection() {
 
   return (
     <div className="rounded-lg border border-slate-200 bg-white p-4">
-      <h3 className="mb-1 flex items-center gap-2 font-semibold text-slate-700">
+      <h3 className="mb-3 flex items-center gap-2 font-semibold text-slate-700">
         <RefreshCw size={18} /> Ενημερώσεις
       </h3>
-      <p className="mb-3 text-xs text-slate-400">
-        Πλήρης έκδοση: {ver || '—'} (στην κορυφή φαίνεται μόνο η κύρια έκδοση). Οι μικρές
-        ενημερώσεις εγκαθίστανται <b>πάντα</b> αυτόματα στο παρασκήνιο, χωρίς αλλαγή της κύριας
-        έκδοσης. Οι σημαντικές εμφανίζουν ειδοποίηση με κουμπί «Λήψη» σε κάθε άνοιγμα μέχρι να γίνει
-        η εγκατάσταση.
-      </p>
       <label className="mb-3 flex items-center gap-2 text-sm text-slate-600">
         <input type="checkbox" checked={auto} onChange={(e) => toggleAuto(e.target.checked)} />
         Ειδοποίηση για σημαντικές ενημερώσεις
