@@ -47,8 +47,11 @@ export default function UpdateBanner({ state, onDownload, onDismiss }) {
 
       {(phase === 'downloaded' || phase === 'installing') && (
         <span className="flex flex-1 items-center gap-2">
-          <Loader2 size={16} className="animate-spin text-blue-600" />
-          Η ενημέρωση εφαρμόζεται… το πρόγραμμα θα επανεκκινήσει.
+          <Loader2 size={16} className="shrink-0 animate-spin text-blue-600" />
+          <span>
+            Η ενημέρωση εγκαθίσταται. Η εφαρμογή <strong>θα κλείσει και θα ανοίξει ξανά μόνη της</strong>{' '}
+            σε λίγα λεπτά — <strong>μην την ανοίξεις εσύ</strong>.
+          </span>
         </span>
       )}
     </div>

@@ -51,20 +51,40 @@ jobs:
           Write-Host "Bundled soffice:" (Resolve-Path "resources\libreoffice\program\soffice.exe").Path
 
       - name: Build Windows installer (.exe)
-        # --publish never: μόνο build, χωρίς auto-publish (το release το κάνει το επόμενο βήμα σε tag).
+        # --publish never: μόνο build, χωρίς auto-upload (το release το κάνει το επόμενο βήμα σε tag).
+        # Επειδή υπάρχει `build.publish` config, παράγονται ΚΑΙ το latest.yml ΚΑΙ το .blockmap στο
+        # release/ (απαραίτητα για auto-update + differential download) — απλώς δεν ανεβαίνουν εδώ.
         run: npm run build && npx electron-builder --win --publish never
 
-      # ΣΗΜ.: Δεν ανεβάζουμε πλέον το installer ως Actions artifact.
-      # Ήταν 100% περιττό (~310 MB/build) και γέμιζε το δωρεάν artifact quota (500 MB):
-      # το installer αποθηκεύεται ήδη ως GitHub Release asset ΚΑΙ στο Google Drive.
-      # Αν χρειαστεί ξανά (π.χ. debug build χωρίς tag), βάλε upload-artifact με retention-days: 1.
+      # Σοβαρότητα ενημέρωσης από το subject του commit του tag ([major] | [silent], default silent).
+      # Διαβάζεται από git (όχι github.event.head_commit, που σε push tag μπορεί να είναι κενό).
+      - name: Determine update severity
+        id: sev
+        shell: pwsh
+        run: |
+          $subject = (git log -1 --pretty=%s).Trim()
+          if ($subject -match '\[major\]') { $sev = '[major]' }
+          elseif ($subject -match '\[silent\]') { $sev = '[silent]' }
+          else { $sev = '[silent]' } # προεπιλογή: σιωπηλή
+          "severity=$sev" | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8
+          Write-Host "Subject: $subject  ->  Σοβαρότητα: $sev"
 
-      # Σε tag (π.χ. v0.1.0) δημιουργεί GitHub Release με συνημμένο το installer.
+      # ΣΗΜ.: Δεν ανεβάζουμε το installer ως Actions artifact (περιττό ~310 MB, γεμίζει το quota):
+      # αποθηκεύεται ως GitHub Release asset ΚΑΙ στο Google Drive.
+
+      # Σε tag (π.χ. v2.0.0) δημιουργεί ΔΗΜΟΣΙΟ GitHub Release με installer + latest.yml + blockmap.
+      # Η severity μπαίνει στο body· η εφαρμογή τη διαβάζει (updater.cjs → resolveSeverity, /releases/latest).
       - name: Create GitHub Release
         if: startsWith(github.ref, 'refs/tags/')
         uses: softprops/action-gh-release@v2
         with:
-          files: release/*.exe
+          make_latest: true
+          body: |
+            Έκδοση ${{ github.ref_name }}. severity: ${{ steps.sev.outputs.severity }}
+          files: |
+            release/*.exe
+            release/*.exe.blockmap
+            release/latest.yml
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 

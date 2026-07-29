@@ -8,8 +8,8 @@
 //  • Μικρές (body [silent] ή χωρίς ετικέτα = προεπιλογή): κατεβαίνουν & εγκαθίστανται
 //    σιωπηλά στο παρασκήνιο, εφαρμόζονται στο επόμενο κλείσιμο (autoInstallOnAppQuit).
 //
-// Το repo είναι private· το token (electron/updateToken.cjs, γραμμένο από το CI) δίνεται
-// στον GitHubProvider μέσω GH_TOKEN. Σε dev ή χωρίς token ο updater μένει ανενεργός.
+// Το repo είναι ΔΗΜΟΣΙΟ: τα releases διαβάζονται χωρίς token (δεν ενσωματώνεται μυστικό στην
+// εφαρμογή). Σε dev ο updater μένει ανενεργός.
 // ---------------------------------------------------------------------------
 
 const { autoUpdater } = require('electron-updater')
@@ -29,16 +29,8 @@ try {
 
 const isDev = !!process.env.VITE_DEV_SERVER_URL
 
-let TOKEN = ''
-try {
-  TOKEN = require('./updateToken.cjs') || ''
-} catch (_e) {
-  TOKEN = ''
-}
-
 const OWNER = 'diplergasies'
 const REPO = 'mathitologio'
-const RELEASE_TAG = 'exp-latest'
 const DEFAULT_SEVERITY = 'silent' // χωρίς ρητή ετικέτα [major]/[silent] → σιωπηλή
 const CHECK_INTERVAL_MS = 6 * 60 * 60 * 1000 // ~6 ώρες
 
@@ -55,14 +47,14 @@ function send(next) {
   if (win && !win.isDestroyed()) win.webContents.send('update:status', next)
 }
 
-// Διαβάζει τη σοβαρότητα από το σώμα (body) του release `exp-latest`: [major] | [silent].
+// Διαβάζει τη σοβαρότητα από το σώμα (body) του πιο πρόσφατου release: [major] | [silent].
+// Public repo → χωρίς Authorization header.
 async function resolveSeverity() {
   try {
     const res = await fetch(
-      `https://api.github.com/repos/${OWNER}/${REPO}/releases/tags/${RELEASE_TAG}`,
+      `https://api.github.com/repos/${OWNER}/${REPO}/releases/latest`,
       {
         headers: {
-          Authorization: `token ${TOKEN}`,
           Accept: 'application/vnd.github+json',
           'User-Agent': 'mathitologio-updater',
         },
@@ -128,7 +120,8 @@ function wire() {
     log.info('updater: η λήψη ολοκληρώθηκε —', info && info.version, majorFlow ? '(major)' : '(silent)')
     if (majorFlow) {
       send({ state: 'downloaded', importance: 'major', version: info.version })
-      // Μικρή καθυστέρηση ώστε να προλάβει να ζωγραφιστεί το UI, μετά αυτόματη επανεκκίνηση.
+      // Καθυστέρηση ώστε ο χρήστης να προλάβει να διαβάσει την προειδοποίηση (η εφαρμογή θα
+      // κλείσει, θα εγκατασταθεί η ενημέρωση και θα ανοίξει ξανά μόνη της) πριν κλείσει το UI.
       setTimeout(() => {
         try {
           log.info('updater: quitAndInstall (major)')
@@ -136,7 +129,7 @@ function wire() {
         } catch (e) {
           log.error('updater: quitAndInstall', e)
         }
-      }, 1200)
+      }, 3000)
     } else {
       log.info('updater: σιωπηλή — θα εγκατασταθεί στο επόμενο κλείσιμο (autoInstallOnAppQuit)')
     }
@@ -155,21 +148,18 @@ function init(winGetter, enabledGetter) {
     log.info('updater: παράλειψη (dev)')
     return
   }
-  if (!TOKEN) {
-    log.warn('updater: ΧΩΡΙΣ TOKEN — ανενεργό (το secret UPDATE_READ_TOKEN είναι κενό;)')
-    return
-  }
   if (started) return
   started = true
 
   autoUpdater.logger = log
-  log.info('updater: init — token OK (μήκος', TOKEN.length, '), ενεργός')
-  process.env.GH_TOKEN = TOKEN
+  log.info('updater: init — public repo, χωρίς token, ενεργός')
   autoUpdater.autoDownload = false
   autoUpdater.autoInstallOnAppQuit = true
-  autoUpdater.allowPrerelease = true
+  autoUpdater.allowPrerelease = false // stable: μόνο κανονικά releases
+  // Το differential (delta) download παραμένει ΕΝΕΡΓΟ: σε public repo δουλεύει σωστά, ώστε οι
+  // ενημερώσεις να μεταφέρουν μόνο το delta κώδικα (το ~300MB LibreOffice δεν ξανακατεβαίνει).
   try {
-    autoUpdater.setFeedURL({ provider: 'github', owner: OWNER, repo: REPO, private: true })
+    autoUpdater.setFeedURL({ provider: 'github', owner: OWNER, repo: REPO, private: false })
   } catch (e) {
     console.error('updater: setFeedURL', e)
   }
