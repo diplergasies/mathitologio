@@ -57,8 +57,10 @@ export default function App() {
     api.appInfo().then(setInfo)
   }, [version])
 
-  // ---- Αυτόματες ενημερώσεις (πειραματικό) ---------------------------------
-  // Μόνο οι «σημαντικές» φτάνουν εδώ (banner)· οι σιωπηλές γίνονται αόρατα στο main.
+  // ---- Αυτόματες ενημερώσεις ------------------------------------------------
+  // Οι «σημαντικές» εμφανίζουν banner (Λήψη → Επανεκκίνηση). Οι σιωπηλές κατεβαίνουν αόρατα και,
+  // μόλις είναι έτοιμες, στέλνουν 'silent-ready' → διακριτική ενημέρωση (θα εφαρμοστεί & θα
+  // ανοίξει ξανά μόνη της στο κλείσιμο).
   function applyUpdate(st) {
     if (!st) return
     if (st.state === 'available' && st.version && st.version === updateDismissedRef.current) return
@@ -213,10 +215,11 @@ export default function App() {
 
   return (
     <div className="flex h-full flex-col">
-      {updateState && updateState.importance === 'major' && (
+      {updateState && (updateState.importance === 'major' || updateState.state === 'silent-ready') && (
         <UpdateBanner
           state={updateState}
           onDownload={() => api.updateDownload()}
+          onInstall={() => api.updateInstall()}
           onDismiss={dismissUpdate}
         />
       )}

@@ -84,6 +84,7 @@ contextBridge.exposeInMainWorld('api', {
   // Αυτόματες ενημερώσεις (πειραματικό).
   updateCheck: () => ipcRenderer.invoke('update:check'),
   updateDownload: () => ipcRenderer.invoke('update:download'),
+  updateInstall: () => ipcRenderer.invoke('update:install'),
   updateGetState: () => ipcRenderer.invoke('update:getState'),
   onUpdateStatus: (cb) => {
     const h = (_e, data) => cb(data)

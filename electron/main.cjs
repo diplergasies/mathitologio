@@ -1465,6 +1465,7 @@ ipcMain.handle('backup:now', () => runAutoBackup({ force: true }))
 // ---- Αυτόματες ενημερώσεις (πειραματικό) ---------------------------------
 ipcMain.handle('update:check', () => updater.checkNow(true)) // χειροκίνητος έλεγχος
 ipcMain.handle('update:download', () => updater.startDownload()) // «Λήψη» σημαντικής
+ipcMain.handle('update:install', () => updater.installNow()) // «Επανεκκίνηση εφαρμογής» (major)
 ipcMain.handle('update:getState', () => updater.getState())
 
 ipcMain.handle('backup:list', () => {

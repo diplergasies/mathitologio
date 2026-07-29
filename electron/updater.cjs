@@ -13,6 +13,7 @@
 // ---------------------------------------------------------------------------
 
 const { autoUpdater } = require('electron-updater')
+const { app, Notification } = require('electron')
 const log = require('electron-log/main')
 
 // Καταγραφή σε αρχείο (updater.log μέσα στο φάκελο logs του userData) — ώστε κάθε
@@ -39,12 +40,23 @@ let isEnabled = () => true
 let started = false
 let silentDownloading = false // αποφυγή διπλού download για σιωπηλή ενημέρωση
 let majorFlow = false // true μόνο αφού ο χρήστης πατήσει «Λήψη» σε σημαντική ενημέρωση
+let silentReady = false // σιωπηλή ενημέρωση κατεβασμένη, εκκρεμεί install+relaunch στο κλείσιμο
+let installing = false // αποτροπή διπλού quitAndInstall / re-entrancy στο before-quit
 let lastState = { state: 'idle' } // τελευταία κατάσταση (για update:getState μετά από navigation)
 
 function send(next) {
   lastState = next
   const win = getWin()
   if (win && !win.isDestroyed()) win.webContents.send('update:status', next)
+}
+
+// Εγγενής ειδοποίηση OS (παραμένει στο Κέντρο ενεργειών των Windows και μετά το κλείσιμο).
+function notify(title, body) {
+  try {
+    if (Notification.isSupported()) new Notification({ title, body }).show()
+  } catch (_e) {
+    /* no-op */
+  }
 }
 
 // Διαβάζει τη σοβαρότητα από το σώμα (body) του πιο πρόσφατου release: [major] | [silent].
@@ -119,19 +131,20 @@ function wire() {
   autoUpdater.on('update-downloaded', (info) => {
     log.info('updater: η λήψη ολοκληρώθηκε —', info && info.version, majorFlow ? '(major)' : '(silent)')
     if (majorFlow) {
+      // MAJOR: ΔΕΝ γίνεται αυτόματη επανεκκίνηση. Το banner εμφανίζει κουμπί «Επανεκκίνηση
+      // εφαρμογής» — ο χρήστης αποφασίζει πότε (αποφυγή race «ffmpeg.dll» από πρόωρο άνοιγμα).
+      log.info('updater: major — αναμονή για το κουμπί «Επανεκκίνηση εφαρμογής»')
       send({ state: 'downloaded', importance: 'major', version: info.version })
-      // Καθυστέρηση ώστε ο χρήστης να προλάβει να διαβάσει την προειδοποίηση (η εφαρμογή θα
-      // κλείσει, θα εγκατασταθεί η ενημέρωση και θα ανοίξει ξανά μόνη της) πριν κλείσει το UI.
-      setTimeout(() => {
-        try {
-          log.info('updater: quitAndInstall (major)')
-          autoUpdater.quitAndInstall(true, true) // σιωπηλή εγκατάσταση + επανεκκίνηση
-        } catch (e) {
-          log.error('updater: quitAndInstall', e)
-        }
-      }, 3000)
     } else {
-      log.info('updater: σιωπηλή — θα εγκατασταθεί στο επόμενο κλείσιμο (autoInstallOnAppQuit)')
+      // SILENT: θα εγκατασταθεί ΚΑΙ θα επανεκκινήσει στο κλείσιμο (βλ. before-quit hook), ώστε ο
+      // χρήστης να μη χρειάζεται να την ανοίξει χειροκίνητα μέσα στο παράθυρο εγκατάστασης.
+      silentReady = true
+      log.info('updater: σιωπηλή έτοιμη — install+relaunch στο κλείσιμο')
+      send({ state: 'silent-ready', importance: 'silent', version: info.version })
+      notify(
+        'Ενημέρωση Μαθητολογίου έτοιμη',
+        'Θα εφαρμοστεί όταν κλείσετε την εφαρμογή και θα ανοίξει ξανά μόνη της. Μετά το κλείσιμο μην την ανοίξετε εσείς — περιμένετε λίγο.'
+      )
     }
   })
 
@@ -154,7 +167,10 @@ function init(winGetter, enabledGetter) {
   autoUpdater.logger = log
   log.info('updater: init — public repo, χωρίς token, ενεργός')
   autoUpdater.autoDownload = false
-  autoUpdater.autoInstallOnAppQuit = true
+  // ΟΧΙ autoInstallOnAppQuit: τη σιωπηλή εγκατάσταση στο κλείσιμο την κάνουμε εμείς ΜΕ
+  // επανεκκίνηση (before-quit hook → quitAndInstall), ώστε ο χρήστης να μη χρειάζεται να ανοίξει
+  // χειροκίνητα την εφαρμογή μέσα στο παράθυρο εγκατάστασης (race → «ffmpeg.dll δεν βρέθηκε»).
+  autoUpdater.autoInstallOnAppQuit = false
   autoUpdater.allowPrerelease = false // stable: μόνο κανονικά releases
   // Το differential (delta) download παραμένει ΕΝΕΡΓΟ: σε public repo δουλεύει σωστά, ώστε οι
   // ενημερώσεις να μεταφέρουν μόνο το delta κώδικα (το ~300MB LibreOffice δεν ξανακατεβαίνει).
@@ -163,6 +179,26 @@ function init(winGetter, enabledGetter) {
   } catch (e) {
     console.error('updater: setFeedURL', e)
   }
+
+  // Σιωπηλή ενημέρωση: εγκατάσταση + επανεκκίνηση όταν ο χρήστης κλείσει την εφαρμογή. Έτσι δεν
+  // υπάρχει «κενό» στο οποίο ο χρήστης θα άνοιγε χειροκίνητα ημιεγκατεστημένα αρχεία. Ειδοποίηση
+  // ότι θα ανοίξει ξανά μόνη της. Το `installing` αποτρέπει re-entrancy (το quitAndInstall
+  // ξαναπυροδοτεί before-quit).
+  app.on('before-quit', (e) => {
+    if (!silentReady || installing) return
+    installing = true
+    e.preventDefault()
+    log.info('updater: quitAndInstall (silent + relaunch) στο κλείσιμο')
+    notify('Εγκαθίσταται ενημέρωση', 'Η εφαρμογή θα ανοίξει ξανά μόνη της σε λίγο — μην την ανοίξετε εσείς.')
+    setTimeout(() => {
+      try {
+        autoUpdater.quitAndInstall(true, true) // σιωπηλή εγκατάσταση + επανεκκίνηση
+      } catch (err) {
+        log.error('updater: quitAndInstall silent', err)
+        app.quit() // fallback: κανονικό κλείσιμο (το installing=true αποτρέπει loop)
+      }
+    }, 700)
+  })
 
   wire()
 
@@ -192,8 +228,22 @@ function startDownload() {
   autoUpdater.downloadUpdate().catch((e) => log.error('updater: startDownload', e))
 }
 
+// Ενεργοποιείται από το κουμπί «Επανεκκίνηση εφαρμογής» (σημαντική ενημέρωση, αφού κατέβει).
+// Εγκατάσταση + επανεκκίνηση, ελεγχόμενα από τον χρήστη (όχι αυτόματα).
+function installNow() {
+  if (!started || installing) return
+  installing = true
+  log.info('updater: ο χρήστης πάτησε «Επανεκκίνηση εφαρμογής» — εγκατάσταση + επανεκκίνηση')
+  try {
+    autoUpdater.quitAndInstall(true, true) // σιωπηλή εγκατάσταση + επανεκκίνηση
+  } catch (e) {
+    log.error('updater: quitAndInstall (major)', e)
+    installing = false
+  }
+}
+
 function getState() {
   return lastState
 }
 
-module.exports = { init, checkNow, startDownload, getState }
+module.exports = { init, checkNow, startDownload, installNow, getState }
