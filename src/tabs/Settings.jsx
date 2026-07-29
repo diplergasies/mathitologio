@@ -660,7 +660,6 @@ function EmailImportSection({ emailCheck, onEmailConfigChange }) {
     <div className="rounded-lg border border-slate-200 bg-white p-4">
       <h3 className="mb-1 flex items-center gap-2 font-semibold text-slate-700">
         <Mail size={18} /> Αυτόματη εισαγωγή λίστας από e-mail (sch.gr)
-        <span className="rounded bg-emerald-100 px-1.5 py-0.5 text-xs font-medium text-emerald-700">Νέο</span>
       </h3>
       <p className="mb-3 text-xs text-slate-400">
         Ελέγχει το γραμματοκιβώτιο (IMAP) για το πιο πρόσφατο e-mail που ταιριάζει με τα{' '}
