@@ -248,7 +248,9 @@ ipcMain.handle('schoolYear:set', (_e, payload) => {
 
 // Κοινή λογική εισαγωγής (XLSX ή PDF): δημιουργία batch, έλεγχος διπλών ΔΙΚΑ, εισαγωγή.
 // parsed = { records, missingFields, totalRows } (από importer.parseFile ή importer.parsePdf).
-function insertRecords(filePath, parsed) {
+// meta (προαιρετικό) = { emailDate, emailMessageId } όταν η λίστα ήρθε μέσω αυτόματης εισαγωγής
+// από e-mail — αποθηκεύεται στο batch για ένδειξη ώρας άφιξης & dedup βάσει Message-ID.
+function insertRecords(filePath, parsed, meta = {}) {
   const { records, missingFields, totalRows } = parsed
 
   const syStart = getSchoolYearStart()
@@ -260,9 +262,16 @@ function insertRecords(filePath, parsed) {
   const colorIndex = cnt % BATCH_COLOR_COUNT
 
   const batchId = db.run(
-    `INSERT INTO batches (imported_at, source_filename, school_year, color_index)
-     VALUES ($a, $f, $y, $c)`,
-    { $a: nowIso(), $f: path.basename(filePath), $y: syLabel, $c: colorIndex }
+    `INSERT INTO batches (imported_at, source_filename, school_year, color_index, email_date, email_message_id)
+     VALUES ($a, $f, $y, $c, $ed, $emid)`,
+    {
+      $a: nowIso(),
+      $f: path.basename(filePath),
+      $y: syLabel,
+      $c: colorIndex,
+      $ed: meta.emailDate || null,
+      $emid: meta.emailMessageId || null,
+    }
   )
 
   // Έλεγχος διπλών ΔΙΚΑ: σε σχέση με ενεργούς μαθητές (άφιξη/εγγεγραμμένοι) ΚΑΙ μέσα στο ίδιο
@@ -370,7 +379,7 @@ ipcMain.handle('import:pdf', async () => {
 // Στοιχεία της τελευταίας λίστας που εισήχθη (όνομα αρχείου + ημ/νία), για ένδειξη σε Αφίξεις/Μαθητές.
 ipcMain.handle('import:lastBatch', () => {
   const rows = db.query(
-    'SELECT source_filename, imported_at FROM batches ORDER BY id DESC LIMIT 1'
+    'SELECT source_filename, imported_at, email_date FROM batches ORDER BY id DESC LIMIT 1'
   )
   return rows[0] || null
 })
@@ -847,9 +856,22 @@ ipcMain.handle('mail:check', async () => {
   if (!r.found) return { ok: true, configured: true, found: false, noAttachment: !!r.noAttachment }
   // unchanged → επαναχρησιμοποίηση του ήδη κατεβασμένου συνημμένου (χωρίς νέα λήψη).
   const filename = r.unchanged && mailCache ? mailCache.filename : r.filename
-  if (!r.unchanged) mailCache = { mailbox: r.mailbox, uid: r.uid, filename: r.filename, content: r.content }
-  // Dedup: σύγκριση με το ίδιο «ασφαλές» όνομα που αποθηκεύεται ως source_filename κατά την εισαγωγή.
-  const alreadyImported = sanitizeName(filename) === lastImportFilename()
+  const messageId = r.messageId || (r.unchanged && mailCache ? mailCache.messageId : '') || ''
+  if (!r.unchanged)
+    mailCache = {
+      mailbox: r.mailbox,
+      uid: r.uid,
+      filename: r.filename,
+      content: r.content,
+      messageId,
+      date: r.date || null,
+    }
+  // Dedup: αν το e-mail έχει Message-ID (πάντα, στην πράξη), ελέγχουμε αν αυτό το ΣΥΓΚΕΚΡΙΜΕΝΟ
+  // μήνυμα έχει ήδη εισαχθεί σε κάποιο batch. Έτσι δύο ομώνυμες λίστες της ίδιας ημέρας (ίδιο
+  // όνομα PDF) ξεχωρίζουν σωστά. Fallback στο παλιό dedup βάσει ονόματος μόνο αν λείπει Message-ID.
+  const alreadyImported = messageId
+    ? db.query('SELECT 1 FROM batches WHERE email_message_id = $m LIMIT 1', { $m: messageId }).length > 0
+    : sanitizeName(filename) === lastImportFilename()
   return {
     ok: true,
     configured: true,
@@ -858,6 +880,7 @@ ipcMain.handle('mail:check', async () => {
     uid: r.uid,
     filename,
     subject: r.subject,
+    messageId,
     date: r.date ? new Date(r.date).toISOString() : null,
     alreadyImported,
   }
@@ -874,7 +897,7 @@ ipcMain.handle('mail:import', async (_e, id = {}) => {
     if (!cfg.username || !cfg.password) return { error: 'Δεν υπάρχουν στοιχεία σύνδεσης.' }
     const r = await mail.downloadByUid(cfg, mailbox, uid)
     if (r.error) return { error: r.error }
-    att = { mailbox, uid, filename: r.filename, content: r.content }
+    att = { mailbox, uid, filename: r.filename, content: r.content, messageId: r.messageId || '', date: r.date || null }
   }
   // Το όνομα αρχείου γίνεται source_filename του batch (για τον έλεγχο «ήδη εισαχθεί»).
   const dir = path.join(app.getPath('temp'), 'mathitologio-mail')
@@ -883,7 +906,12 @@ ipcMain.handle('mail:import', async (_e, id = {}) => {
     const tmp = path.join(dir, sanitizeName(att.filename))
     fs.writeFileSync(tmp, att.content)
     const parsed = await importer.parsePdf(tmp)
-    const res = insertRecords(tmp, parsed)
+    // Μεταδεδομένα e-mail στο batch: ώρα άφιξης (INTERNALDATE) & Message-ID (κλειδί dedup).
+    const meta = {
+      emailDate: att.date ? new Date(att.date).toISOString() : null,
+      emailMessageId: att.messageId || null,
+    }
+    const res = insertRecords(tmp, parsed, meta)
     try { fs.unlinkSync(tmp) } catch {}
     mailCache = null
     return res

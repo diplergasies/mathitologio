@@ -3,7 +3,16 @@ import { Mail, Download } from 'lucide-react'
 
 // Επιβεβαίωση εισαγωγής νέας λίστας που βρέθηκε στο e-mail (sch.gr).
 export default function EmailPromptModal({ prompt, busy, onImport, onClose }) {
-  const dateStr = prompt.date ? new Date(prompt.date).toLocaleDateString('el-GR') : ''
+  // Ώρα άφιξης (ημερομηνία + ώρα) — ώστε δύο ομώνυμες λίστες της ίδιας ημέρας να ξεχωρίζουν.
+  const dateStr = prompt.date
+    ? new Date(prompt.date).toLocaleString('el-GR', {
+        day: '2-digit',
+        month: '2-digit',
+        year: 'numeric',
+        hour: '2-digit',
+        minute: '2-digit',
+      })
+    : ''
 
   const footer = (
     <>
@@ -37,7 +46,7 @@ export default function EmailPromptModal({ prompt, busy, onImport, onClose }) {
           {prompt.subject && (
             <p className="truncate text-xs text-slate-500">Θέμα: {prompt.subject}</p>
           )}
-          {dateStr && <p className="text-xs text-slate-500">Ημερομηνία e-mail: {dateStr}</p>}
+          {dateStr && <p className="text-xs text-slate-500">Έφτασε στο e-mail: {dateStr}</p>}
           <p className="mt-2 text-xs text-slate-400">
             Η εισαγωγή ακολουθεί τους ίδιους κανόνες με τη χειροκίνητη (σχολική ηλικία, διπλά ΔΙΚΑ,
             ανίχνευση αποχωρήσεων).

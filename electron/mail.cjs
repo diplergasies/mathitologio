@@ -107,14 +107,24 @@ async function findLatestInOpen(client, cfg) {
   if (!uids || !uids.length) return null
 
   let best = null
-  for await (const msg of client.fetch({ uid: uids }, { uid: true, envelope: true })) {
+  for await (const msg of client.fetch({ uid: uids }, { uid: true, envelope: true, internalDate: true })) {
     const env = msg.envelope || {}
     const envScore = envelopeScore(env, cfg)
     if (envScore < 1) continue
-    const date = env.date || null
+    // INTERNALDATE = πραγματική ώρα άφιξης στο mailbox (πιο αξιόπιστη σειρά/ώρα από το header
+    // Date:, που τον ορίζει ο αποστολέας). Fallback στο header μόνο αν λείπει.
+    const date = msg.internalDate || env.date || null
     const t = date ? new Date(date).getTime() : 0
     if (!best || envScore > best.envScore || (envScore === best.envScore && t > best.t))
-      best = { uid: msg.uid, date, subject: env.subject || '', from: fromString(env), envScore, t }
+      best = {
+        uid: msg.uid,
+        date,
+        messageId: (env.messageId || '').trim(),
+        subject: env.subject || '',
+        from: fromString(env),
+        envScore,
+        t,
+      }
   }
   return best
 }
@@ -140,7 +150,15 @@ async function findLatestAllFolders(client, cfg) {
     }
   }
   if (!best) return null
-  return { mailbox: best.mailbox, uid: best.uid, date: best.date, subject: best.subject, from: best.from, envScore: best.envScore }
+  return {
+    mailbox: best.mailbox,
+    uid: best.uid,
+    date: best.date,
+    messageId: best.messageId || '',
+    subject: best.subject,
+    from: best.from,
+    envScore: best.envScore,
+  }
 }
 
 // Λήψη πλήρους μηνύματος + εξαγωγή του πρώτου συνημμένου PDF (φάκελος ήδη ανοιχτός).
@@ -198,14 +216,25 @@ async function downloadByUid(config, mailbox, uid) {
     await client.connect()
     let lock = null
     let att = null
+    let meta = { messageId: '', date: null }
     try {
       lock = await client.getMailboxLock(mailbox || 'INBOX')
       att = await fetchPdfAttachment(client, uid)
+      // Μεταδεδομένα μηνύματος (Message-ID + INTERNALDATE) για dedup & ένδειξη ώρας άφιξης.
+      try {
+        const info = await client.fetchOne(uid, { envelope: true, internalDate: true }, { uid: true })
+        if (info) {
+          meta = {
+            messageId: ((info.envelope && info.envelope.messageId) || '').trim(),
+            date: info.internalDate || (info.envelope && info.envelope.date) || null,
+          }
+        }
+      } catch {}
     } finally {
       if (lock) try { lock.release() } catch {}
     }
     if (!att) return { error: 'Δεν βρέθηκε συνημμένο PDF στο μήνυμα.' }
-    return { ok: true, ...att }
+    return { ok: true, ...att, messageId: meta.messageId, date: meta.date }
   } catch (err) {
     return { error: friendly(err) }
   } finally {

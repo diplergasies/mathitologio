@@ -98,6 +98,11 @@ async function init(userDataDir) {
   // Χειροκίνητος χρωματικός κωδικός γραμμής (color code) ανά μαθητή — ώστε διαφορετικοί
   // ΣΕΠ στην ίδια δομή να ξεχωρίζουν τους μαθητές τους. Αποθηκεύεται ως hex ή NULL.
   ensureColumn('students', 'color_code', 'TEXT')
+  // Μεταδεδομένα e-mail για λίστες που ήρθαν μέσω αυτόματης εισαγωγής (sch.gr, πειραματικό):
+  // ώρα άφιξης (INTERNALDATE, ISO) & Message-ID. Το Message-ID χρησιμεύει ως αξιόπιστο κλειδί
+  // dedup ώστε δύο ομώνυμες λίστες της ίδιας ημέρας (ίδιο όνομα PDF) να μη μπερδεύονται.
+  ensureColumn('batches', 'email_date', 'TEXT')
+  ensureColumn('batches', 'email_message_id', 'TEXT')
   // Backfill: παλαιότεροι εγγεγραμμένοι χωρίς enrolled_at -> updated_at/created_at (καλύτερη εκτίμηση).
   db.run(
     `UPDATE students SET enrolled_at = COALESCE(updated_at, created_at)
