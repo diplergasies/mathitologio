@@ -65,6 +65,8 @@ contextBridge.exposeInMainWorld('api', {
   observatoryStats: (period) => ipcRenderer.invoke('stats:observatory', period),
   saveReportDocx: (data, defaultName) =>
     ipcRenderer.invoke('report:saveDocx', { data, defaultName }),
+  saveStudentsXlsx: (data, defaultName) =>
+    ipcRenderer.invoke('students:saveXlsx', { data, defaultName }),
 
   calendarEvents: (range) => ipcRenderer.invoke('calendar:events', range),
   addCalendarNote: (payload) => ipcRenderer.invoke('calendar:addNote', payload),

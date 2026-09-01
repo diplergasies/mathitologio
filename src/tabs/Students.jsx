@@ -5,13 +5,14 @@ import DocumentModal from '../components/DocumentModal'
 import BulkDocumentModal from '../components/BulkDocumentModal'
 import BulkDeleteByDikaModal from '../components/BulkDeleteByDikaModal'
 import DeleteReasonModal from '../components/DeleteReasonModal'
+import ExportStudentsModal from '../components/ExportStudentsModal'
 import SchoolCell from '../components/SchoolCell'
 import GradeCell from '../components/GradeCell'
 import LastImportBadge from '../components/LastImportBadge'
 import { useSelection } from '../useSelection'
 import { birthSortValue } from '../sort'
 import { isoToDMY } from '../calendarUtils'
-import { FileText, Trash2, Users, Hash } from 'lucide-react'
+import { FileText, Trash2, Users, Hash, FileSpreadsheet } from 'lucide-react'
 
 export default function Students({ version, bump }) {
   const [students, setStudents] = useState([])
@@ -20,6 +21,7 @@ export default function Students({ version, bump }) {
   const [dikaDelete, setDikaDelete] = useState(false)
   const [delFor, setDelFor] = useState(null) // μαθητής προς διαγραφή (single)
   const [bulkDel, setBulkDel] = useState(false) // μαζική διαγραφή επιλεγμένων
+  const [exportOpen, setExportOpen] = useState(false)
   const sel = useSelection()
 
   function load() {
@@ -134,12 +136,20 @@ export default function Students({ version, bump }) {
           <span className="text-sm text-slate-500">{students.length} εγγεγραμμένοι μαθητές</span>
           <LastImportBadge version={version} />
         </div>
-        <button
-          onClick={() => setDikaDelete(true)}
-          className="inline-flex items-center gap-1.5 rounded-md border border-red-300 px-3 py-1.5 text-sm font-medium text-red-600 hover:bg-red-50"
-        >
-          <Hash size={15} /> Μαζική διαγραφή με ΔΙΚΑ
-        </button>
+        <div className="flex items-center gap-2">
+          <button
+            onClick={() => setExportOpen(true)}
+            className="inline-flex items-center gap-1.5 rounded-md bg-emerald-600 px-3 py-1.5 text-sm font-medium text-white hover:bg-emerald-700"
+          >
+            <FileSpreadsheet size={15} /> Εξαγωγή σε Excel
+          </button>
+          <button
+            onClick={() => setDikaDelete(true)}
+            className="inline-flex items-center gap-1.5 rounded-md border border-red-300 px-3 py-1.5 text-sm font-medium text-red-600 hover:bg-red-50"
+          >
+            <Hash size={15} /> Μαζική διαγραφή με ΔΙΚΑ
+          </button>
+        </div>
       </div>
 
       {sel.ids.length > 0 && (
@@ -225,6 +235,13 @@ export default function Students({ version, bump }) {
             bump()
           }}
           onClose={() => setBulkDel(false)}
+        />
+      )}
+
+      {exportOpen && (
+        <ExportStudentsModal
+          students={sel.ids.length > 0 ? students.filter((s) => sel.ids.includes(s.id)) : students}
+          onClose={() => setExportOpen(false)}
         />
       )}
 

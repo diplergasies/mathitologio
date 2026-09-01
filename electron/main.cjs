@@ -402,6 +402,24 @@ ipcMain.handle('report:saveDocx', async (_e, { data, defaultName } = {}) => {
   }
 })
 
+// Αποθήκευση των μαθητών σε .xlsx. Τα bytes παράγονται στο renderer (βιβλιοθήκη xlsx) και
+// εδώ απλώς ανοίγει διάλογος αποθήκευσης και γράφεται το αρχείο.
+ipcMain.handle('students:saveXlsx', async (_e, { data, defaultName } = {}) => {
+  if (!data) return { canceled: true }
+  const { canceled, filePath } = await dialog.showSaveDialog({
+    title: 'Αποθήκευση μαθητών σε Excel',
+    defaultPath: defaultName || 'Μαθητές.xlsx',
+    filters: [{ name: 'Βιβλίο Excel', extensions: ['xlsx'] }],
+  })
+  if (canceled || !filePath) return { canceled: true }
+  try {
+    fs.writeFileSync(filePath, Buffer.from(data))
+    return { ok: true, filePath }
+  } catch (err) {
+    return { error: `Αποτυχία αποθήκευσης: ${err && err.message ? err.message : err}` }
+  }
+})
+
 // Κοινό batch για όλες τις χειροκίνητες καταχωρήσεις ενός σχολικού έτους (ένα χρώμα/πηγή).
 function getOrCreateManualBatch(syLabel) {
   const MANUAL = 'Χειροκίνητη καταχώρηση'
