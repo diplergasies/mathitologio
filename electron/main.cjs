@@ -516,6 +516,10 @@ ipcMain.handle('data:reset', () => {
 })
 
 function studentsByStatus(status) {
+  const orderBy =
+    status === 'deleted'
+      ? 'ORDER BY s.deleted_at DESC, s.eponymo COLLATE NOCASE, s.onoma COLLATE NOCASE'
+      : 'ORDER BY s.batch_id DESC, s.eponymo COLLATE NOCASE, s.onoma COLLATE NOCASE'
   return db.query(
     `SELECT s.*, b.color_index AS batch_color, b.school_year AS batch_year,
             b.imported_at AS batch_imported_at, sc.name AS school_name, sc.type AS school_type,
@@ -524,7 +528,7 @@ function studentsByStatus(status) {
        LEFT JOIN batches b ON b.id = s.batch_id
        LEFT JOIN schools sc ON sc.id = s.school_id
       WHERE s.status = $st
-      ORDER BY s.batch_id DESC, s.eponymo COLLATE NOCASE, s.onoma COLLATE NOCASE`,
+      ${orderBy}`,
     { $st: status }
   )
 }
