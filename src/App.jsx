@@ -28,7 +28,7 @@ const TABS = [
 ]
 
 export default function App() {
-  const [tab, setTab] = useState('arrivals')
+  const [tab, setTab] = useState('students') // αρχική καρτέλα· μετά από εισαγωγή λίστας → Αφίξεις (reportImport)
   const [version, setVersion] = useState(0)
   const [info, setInfo] = useState(null)
   const [toast, setToast] = useState(null)
