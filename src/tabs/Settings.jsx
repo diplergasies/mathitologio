@@ -3,7 +3,7 @@ import api from '../api'
 import Schools from './Schools'
 import PromotionModal from '../components/PromotionModal'
 import ResetDataModal from '../components/ResetDataModal'
-import { UserCog, Save, School, CalendarRange, GraduationCap, DatabaseBackup, FolderOpen, Play, FileText, FilePlus2, Trash2, AlertTriangle, Mail, RefreshCw, KeyRound, Search } from 'lucide-react'
+import { UserCog, Save, School, CalendarRange, GraduationCap, DatabaseBackup, FolderOpen, Play, FileText, FilePlus2, Trash2, AlertTriangle, Mail, RefreshCw, KeyRound, Search, HelpCircle } from 'lucide-react'
 
 // Βαθμίδες με σταθερό κλειδί `type` (ίδιο με το backend) και ετικέτα εμφάνισης.
 const BAND_DEFS = [
@@ -336,6 +336,91 @@ function BackupSection() {
   )
 }
 
+// Διαχείριση των θυμημένων τιμών των πεδίων «?» (σταθερά στοιχεία χρήστη, tokens {{?...}}).
+// Αντλεί ετικέτες από τα πρότυπα + όσες έχουν ήδη αποθηκευμένη τιμή (κλειδιά settings `ask:*`).
+function RememberedFieldsSection({ templates }) {
+  const [values, setValues] = useState({}) // { label: value }
+  const [saved, setSaved] = useState(false)
+
+  function reload() {
+    api.getSettings().then((s) => {
+      const v = {}
+      Object.keys(s || {}).forEach((k) => {
+        if (k.startsWith('ask:')) v[k.slice(4)] = s[k]
+      })
+      setValues(v)
+    })
+  }
+  useEffect(reload, [])
+
+  const labels = [
+    ...new Set([
+      ...templates.flatMap((t) => (t.askFields || []).map((a) => a.label)),
+      ...Object.keys(values),
+    ]),
+  ].sort((a, b) => a.localeCompare(b, 'el'))
+
+  if (labels.length === 0) return null
+
+  function set(label, val) {
+    setValues((v) => ({ ...v, [label]: val }))
+    setSaved(false)
+  }
+  async function save() {
+    const obj = {}
+    labels.forEach((l) => (obj['ask:' + l] = values[l] || ''))
+    await api.setSettings(obj)
+    setSaved(true)
+    setTimeout(() => setSaved(false), 3000)
+  }
+  async function clearOne(label) {
+    await api.setSettings({ ['ask:' + label]: '' })
+    set(label, '')
+  }
+
+  return (
+    <div className="mt-4 rounded-lg border border-emerald-200 bg-emerald-50/40 p-3">
+      <h4 className="mb-1 flex items-center gap-2 text-sm font-semibold text-emerald-700">
+        <HelpCircle size={16} /> Αποθηκευμένα στοιχεία (πεδία «?»)
+      </h4>
+      <p className="mb-3 text-xs text-slate-500">
+        Σταθερά στοιχεία που ζητούνται κατά την έκδοση (tokens {'{{?...}}'}) και θυμούνται. Μπορείς να τα
+        προ-συμπληρώσεις ή να τα καθαρίσεις εδώ.
+      </p>
+      <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+        {labels.map((label) => (
+          <div key={label}>
+            <label className="mb-1 block text-xs text-slate-600">{label}</label>
+            <div className="flex items-center gap-1">
+              <input
+                value={values[label] || ''}
+                onChange={(e) => set(label, e.target.value)}
+                className="w-full rounded-md border border-slate-300 px-2 py-1.5 text-sm"
+              />
+              <button
+                onClick={() => clearOne(label)}
+                title="Καθαρισμός"
+                className="rounded-md border border-slate-300 p-1.5 text-slate-500 hover:bg-slate-100"
+              >
+                <Trash2 size={14} />
+              </button>
+            </div>
+          </div>
+        ))}
+      </div>
+      <div className="mt-3 flex items-center gap-3">
+        <button
+          onClick={save}
+          className="inline-flex items-center gap-1.5 rounded-md bg-emerald-600 px-3 py-1.5 text-sm font-medium text-white hover:bg-emerald-700"
+        >
+          <Save size={15} /> Αποθήκευση
+        </button>
+        {saved && <span className="text-sm text-green-600">Αποθηκεύτηκε ✓</span>}
+      </div>
+    </div>
+  )
+}
+
 function TemplatesSection() {
   const [templates, setTemplates] = useState([])
   const [msg, setMsg] = useState(null) // { text, type }
@@ -466,9 +551,11 @@ function TemplatesSection() {
                           <span
                             key={tok}
                             className={`rounded px-1.5 py-0.5 text-xs ${
-                              (t.unknownTokens || []).includes(tok)
-                                ? 'bg-amber-100 text-amber-700'
-                                : 'bg-slate-100 text-slate-600'
+                              tok.startsWith('?')
+                                ? 'bg-emerald-100 text-emerald-700'
+                                : (t.unknownTokens || []).includes(tok)
+                                  ? 'bg-amber-100 text-amber-700'
+                                  : 'bg-slate-100 text-slate-600'
                             }`}
                           >
                             {tok}
@@ -476,9 +563,14 @@ function TemplatesSection() {
                         ))
                       )}
                     </div>
+                    {(t.askFields || []).length > 0 && (
+                      <p className="mt-1 flex items-center gap-1 text-xs text-emerald-600">
+                        <HelpCircle size={12} /> Πεδία «?» — ζητιούνται κατά την έκδοση &amp; θυμούνται.
+                      </p>
+                    )}
                     {(t.unknownTokens || []).length > 0 && (
                       <p className="mt-1 flex items-center gap-1 text-xs text-amber-600">
-                        <AlertTriangle size={12} /> Άγνωστα tokens — δεν συμπληρώνονται.
+                        <AlertTriangle size={12} /> Άγνωστα tokens — ζητιούνται ανά έγγραφο (κενά στη μαζική).
                       </p>
                     )}
                   </td>
@@ -501,6 +593,8 @@ function TemplatesSection() {
           </tbody>
         </table>
       </div>
+
+      <RememberedFieldsSection templates={templates} />
     </div>
   )
 }

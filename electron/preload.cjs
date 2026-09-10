@@ -37,8 +37,8 @@ contextBridge.exposeInMainWorld('api', {
   addTemplate: () => ipcRenderer.invoke('templates:add'),
   deleteTemplate: (file) => ipcRenderer.invoke('templates:delete', file),
   openTemplatesFolder: () => ipcRenderer.invoke('templates:openFolder'),
-  generateDocument: (id, templateFile, signee) =>
-    ipcRenderer.invoke('documents:generate', { id, templateFile, signee }),
+  generateDocument: (id, templateFile, signee, extras) =>
+    ipcRenderer.invoke('documents:generate', { id, templateFile, signee, extras }),
 
   bulkDelete: (ids, reason) => ipcRenderer.invoke('students:bulkDelete', { ids, reason }),
   bulkRestore: (ids) => ipcRenderer.invoke('students:bulkRestore', ids),

@@ -137,6 +137,13 @@ function buildDocData(s, cfg) {
 // Όλα τα tokens που γεμίζει η εφαρμογή (για προειδοποίηση άγνωστων σε πρότυπα χρήστη).
 const KNOWN_TOKENS = Object.keys(buildDocData({}, {})).concat(['signee', 'signee.prop'])
 
+// Prefix που δηλώνει token «ζήτα το κατά την έκδοση & θυμήσου το» (π.χ. {{?Διεύθυνση}}).
+// Αν χρειαστεί αλλαγή, αρκεί αυτή η γραμμή (+ η τεκμηρίωση σε Βοήθεια/ιστοσελίδα).
+const ASK_PREFIX = '?'
+// Κλειδί ρύθμισης όπου αποθηκεύεται η θυμημένη τιμή ενός ask-πεδίου, ανά ετικέτα.
+const askKey = (label) => 'ask:' + String(label).trim()
+const askLabel = (token) => token.slice(ASK_PREFIX.length).trim()
+
 // Υπολογισμός υπογράφοντα ({{signee}}, {{signee.prop}}) βάσει της επιλογής του χρήστη.
 // choice: { type: 'father'|'mother'|'sep'|'other', name?, prop? }
 function computeSignee(s, cfg, choice) {
@@ -1161,9 +1168,18 @@ ipcMain.handle('documents:bulkGenerate', async (_e, { ids = [], templateFiles = 
         continue
       }
       try {
+        // Στη μαζική έκδοση δεν ζητούνται ελεύθερα πεδία ανά μαθητή· κενώνουμε τυχόν
+        // «άγνωστα» tokens του προτύπου ώστε να μην εμφανιστεί το {{token}} στο PDF.
+        // Τα πεδία με prefix ? (σταθερά στοιχεία) γεμίζουν από τις θυμημένες τιμές.
+        const tdata = { ...data }
+        try {
+          for (const t of documents.extractTokens(templatePath)) {
+            if (!(t in tdata)) tdata[t] = t.startsWith(ASK_PREFIX) ? (cfg[askKey(askLabel(t))] || '') : ''
+          }
+        } catch {}
         const pdf = documents.generate({
           templatePath,
-          data,
+          data: tdata,
           resourcesPath: isDev ? null : process.resourcesPath,
           isDev,
           userDataPath: app.getPath('userData'),
@@ -1246,6 +1262,7 @@ ipcMain.handle('settings:set', (_e, obj) => {
 ipcMain.handle('documents:list', () => {
   // Σάρωση ενσωματωμένων + προτύπων χρήστη. Σε σύγκρουση ονόματος υπερισχύει το πρότυπο χρήστη.
   const byFile = new Map()
+  const cfg = db.getAllSettings()
   const scan = (dir, builtin) => {
     if (!fs.existsSync(dir)) return
     fs.readdirSync(dir)
@@ -1257,13 +1274,22 @@ ipcMain.handle('documents:list', () => {
         } catch {
           tokens = []
         }
+        // Πεδία «ζήτα & θυμήσου» (token με prefix ?): φιλική ετικέτα + προ-συμπληρωμένη θυμημένη τιμή.
+        const askFields = tokens
+          .filter((t) => t.startsWith(ASK_PREFIX))
+          .map((t) => {
+            const label = askLabel(t)
+            return { token: t, label, value: cfg[askKey(label)] || '' }
+          })
         byFile.set(f, {
           file: f,
           label: f.replace(/\.(pptx|docx)$/i, ''),
           needsSignee: tokens.includes('signee') || tokens.includes('signee.prop'),
           builtin,
           tokens,
-          unknownTokens: tokens.filter((t) => !KNOWN_TOKENS.includes(t)),
+          // «Άγνωστα» ελεύθερα πεδία ανά έγγραφο (χωρίς prefix ?, πάντα κενά — π.χ. σχολείο προορισμού).
+          unknownTokens: tokens.filter((t) => !KNOWN_TOKENS.includes(t) && !t.startsWith(ASK_PREFIX)),
+          askFields,
         })
       })
   }
@@ -1337,7 +1363,7 @@ ipcMain.handle('templates:openFolder', async () => {
   }
 })
 
-ipcMain.handle('documents:generate', async (_e, { id, templateFile, signee }) => {
+ipcMain.handle('documents:generate', async (_e, { id, templateFile, signee, extras }) => {
   const rows = db.query(
     `SELECT s.*, sc.name AS school_name, sc.type AS school_type
        FROM students s LEFT JOIN schools sc ON sc.id = s.school_id
@@ -1356,6 +1382,18 @@ ipcMain.handle('documents:generate', async (_e, { id, templateFile, signee }) =>
     const sg = computeSignee(s, cfg, signee)
     data['signee'] = sg.signee
     data['signee.prop'] = sg.prop
+  }
+  // Ελεύθερα πεδία που συμπλήρωσε ο χρήστης (π.χ. σχολείο προέλευσης/προορισμού σε
+  // αίτηση μετεγγραφής) — αντιστοιχούν σε «άγνωστα» tokens του προτύπου.
+  // Τα πεδία με prefix ? (σταθερά στοιχεία χρήστη) τα θυμόμαστε για τις επόμενες εκδόσεις.
+  if (extras && typeof extras === 'object') {
+    const remember = {}
+    for (const [k, v] of Object.entries(extras)) {
+      if (v == null) continue
+      data[k] = String(v)
+      if (k.startsWith(ASK_PREFIX) && String(v).trim()) remember[askKey(askLabel(k))] = String(v)
+    }
+    if (Object.keys(remember).length) db.setSettings(remember)
   }
 
   let pdfPath
