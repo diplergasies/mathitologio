@@ -21,7 +21,7 @@ export default function SignaturePad({ onChange }) {
     ctx.lineWidth = 2.4
     ctx.lineCap = 'round'
     ctx.lineJoin = 'round'
-    ctx.strokeStyle = '#0f172a'
+    ctx.strokeStyle = '#1a3fd0' // μπλε, όπως στυλό
   }, [])
 
   function pos(e) {

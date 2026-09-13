@@ -171,11 +171,12 @@ function computeSignee(s, cfg, choice) {
   }
 }
 
-// Παρένθεση κάτω από την υπογραφή, ΜΟΝΟ όταν υπογράφει ο ΣΕΠ (ασυνόδευτος χωρίς επίτροπο).
+// Παρένθεση κάτω από την υπογραφή, ΜΟΝΟ όταν ο μαθητής είναι ασυνόδευτος ΚΑΙ υπογράφει ο ΣΕΠ.
 // Γεμίζει το token {{signee.note}} — αλλιώς κενό. Ο νομός σε γενική από ρύθμιση nomos_gen
 // (fallback στο υπάρχον nomos, το οποίο ίσως είναι ήδη σε γενική).
-function computeSigneeNote(cfg, choice) {
+function computeSigneeNote(cfg, choice, s) {
   if (!choice || choice.type !== 'sep') return ''
+  if (!s || s.asynodeftos !== 'Ναι') return ''
   const nomosGen = (cfg.nomos_gen || cfg.nomos || '').trim()
   return nomosGen
     ? `Σε αναμονή ορισμού επιτρόπου από την Εισαγγελία νομού ${nomosGen}`
@@ -1505,8 +1506,8 @@ ipcMain.handle('documents:generatePackage', async (_e, payload) => {
       continue
     }
     const data = buildDocData(s, cfg)
-    // Παρένθεση ΣΕΠ μόνο όταν υπογράφει ο ΣΕΠ (εξαρτάται από τον υπογράφοντα, όχι την κατηγορία).
-    const note = computeSigneeNote(cfg, doc.signee)
+    // Παρένθεση ΣΕΠ μόνο όταν ο μαθητής είναι ασυνόδευτος ΚΑΙ υπογράφει ο ΣΕΠ.
+    const note = computeSigneeNote(cfg, doc.signee, s)
     let images
     if (doc.signee) {
       const sg = computeSignee(s, cfg, doc.signee)

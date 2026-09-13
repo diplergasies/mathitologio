@@ -16,21 +16,17 @@ const T = {
 }
 
 const CATEGORIES = [
-  { key: 'minor_family', label: 'Ανήλικος με οικογένεια (γονείς/συγγενής)', signer: 'family', docs: [T.aitisi, T.yd, T.adym] },
-  { key: 'unaccompanied_no_guardian', label: 'Ασυνόδευτος ανήλικος', signer: 'unaccompanied', docs: [T.aitisi, T.yd, T.adym] },
-  { key: 'adult', label: 'Ενήλικας (υπογράφει ο ίδιος)', signer: 'self', docs: [T.aitisiEnilikon, T.ydEnilikon, T.adym] },
+  { key: 'minor', label: 'Ανήλικος', signer: 'minor', docs: [T.aitisi, T.yd, T.adym] },
+  { key: 'adult', label: 'Ενήλικας', signer: 'self', docs: [T.aitisiEnilikon, T.ydEnilikon, T.adym] },
 ]
 
-// Αρχική επιλογή υπογράφοντα ανά κατηγορία.
-function defaultChoice(signer) {
-  if (signer === 'unaccompanied') return { type: 'sep' }
-  return { type: 'father' } // family
+// Αρχική επιλογή υπογράφοντα (ανήλικοι): ασυνόδευτος → ΣΕΠ, αλλιώς Πατέρας.
+function defaultChoice(s) {
+  return s && s.asynodeftos === 'Ναι' ? { type: 'sep' } : { type: 'father' }
 }
 
 function suggestCategory(s) {
-  if (s.enilikas === 'Ναι') return 'adult'
-  if (s.asynodeftos === 'Ναι') return 'unaccompanied_no_guardian'
-  return 'minor_family'
+  return s.enilikas === 'Ναι' ? 'adult' : 'minor'
 }
 
 export default function RegistrationPackageModal({ student, onClose }) {
@@ -38,7 +34,7 @@ export default function RegistrationPackageModal({ student, onClose }) {
   const [schools, setSchools] = useState([])
   const [settings, setSettings] = useState({})
   const [category, setCategory] = useState(suggestCategory(student))
-  const [choice, setChoice] = useState(() => defaultChoice(CATEGORIES.find((c) => c.key === suggestCategory(student)).signer))
+  const [choice, setChoice] = useState(() => defaultChoice(student))
   const [signature, setSignature] = useState(null) // { dataUrl, wPx, hPx } | null
   const [identity, setIdentity] = useState(null) // ταυτοποιητικό μαθητή (dataUrl | null)
   const [identitySigner, setIdentitySigner] = useState(null) // ταυτοποιητικό υπογράφοντα (οικογένεια)
@@ -85,12 +81,12 @@ export default function RegistrationPackageModal({ student, onClose }) {
 
   // Επαναφορά υπογράφοντα όταν αλλάζει η κατηγορία.
   useEffect(() => {
-    setChoice(defaultChoice(cat.signer))
+    setChoice(defaultChoice(student))
   }, [category]) // eslint-disable-line react-hooks/exhaustive-deps
 
   // Χτίσιμο του signer choice ανά κατηγορία.
   const builtChoice = useMemo(() => {
-    if (cat.signer === 'family' || cat.signer === 'unaccompanied') return choice
+    if (cat.signer === 'minor') return choice
     if (cat.signer === 'self') return { type: 'self' }
     return null
   }, [cat, choice])
@@ -131,7 +127,7 @@ export default function RegistrationPackageModal({ student, onClose }) {
       category,
       docs,
       identity: identity ? { dataUrl: identity } : null,
-      identitySigner: cat.signer === 'family' && identitySigner ? { dataUrl: identitySigner } : null,
+      identitySigner: cat.signer === 'minor' && choice.type !== 'sep' && identitySigner ? { dataUrl: identitySigner } : null,
     })
     setBusy(false)
     setResult(res)
@@ -207,16 +203,21 @@ export default function RegistrationPackageModal({ student, onClose }) {
       {/* 3) Υπογράφων */}
       {signeeDocs.length > 0 && (
         <div className="mb-4 rounded-md border border-slate-200 p-3">
-          {cat.signer === 'family' && (
-            <SigneePicker value={choice} onChange={setChoice} options={['father', 'mother', 'other']} hints={hints} />
-          )}
-          {cat.signer === 'unaccompanied' && (
+          {cat.signer === 'minor' && (
             <>
-              <SigneePicker value={choice} onChange={setChoice} options={['sep', 'other']} hints={hints} />
-              {choice.type === 'sep' && (
+              <p className="mb-2 text-xs text-slate-500">
+                Ασυνόδευτος: <strong>{student.asynodeftos === 'Ναι' ? 'Ναι' : 'Όχι'}</strong>
+              </p>
+              <SigneePicker value={choice} onChange={setChoice} options={['father', 'mother', 'sep', 'other']} hints={hints} />
+              {choice.type === 'sep' && student.asynodeftos === 'Ναι' && (
                 <p className="mt-2 text-xs text-slate-500">
                   Θα προστεθεί κάτω από την υπογραφή: «Σε αναμονή ορισμού επιτρόπου από την Εισαγγελία νομού{' '}
                   {settings.nomos_gen || settings.nomos || '…'}».
+                </p>
+              )}
+              {choice.type === 'sep' && student.asynodeftos !== 'Ναι' && (
+                <p className="mt-2 text-xs text-slate-400">
+                  (Η παρένθεση επιτρόπου δεν προστίθεται — ο μαθητής δεν είναι ασυνόδευτος.)
                 </p>
               )}
             </>
@@ -264,10 +265,10 @@ export default function RegistrationPackageModal({ student, onClose }) {
         <CameraCapture label="Ταυτοποιητικό μαθητή (κάρτα ταυτότητας Δομής)" onChange={setIdentity} />
       </div>
 
-      {/* 5β) Ταυτοποιητικό υπογράφοντα — μόνο για «οικογένεια» */}
-      {cat.signer === 'family' && (
+      {/* 5β) Ταυτοποιητικό υπογράφοντα — ανήλικος όταν υπογράφει γονέας/συγγενής/άλλος (όχι ΣΕΠ) */}
+      {cat.signer === 'minor' && choice.type !== 'sep' && (
         <div className="mb-4">
-          <CameraCapture label="Ταυτοποιητικό γονέα/συγγενή (υπογράφοντα)" onChange={setIdentitySigner} />
+          <CameraCapture label="Ταυτοποιητικό υπογράφοντα (γονέα/συγγενή)" onChange={setIdentitySigner} />
         </div>
       )}
 
