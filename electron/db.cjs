@@ -94,6 +94,10 @@ async function init(userDataDir) {
   // Flags μαθητή (Α1.5 / Α3.1) + λόγος διαγραφής (Γ1/Γ2).
   ensureColumn('students', 'asynodeftos', "TEXT NOT NULL DEFAULT 'Όχι'")
   ensureColumn('students', 'eidiki_agogi', "TEXT NOT NULL DEFAULT 'Όχι'")
+  // Ενήλικας μαθητής: οι ενήλικες κατατάσσονται σε κανονική βαθμίδα (μέσω των χειροκίνητων
+  // ευρών ηλικίας), άρα δεν διακρίνονται από την ηλικία — χρειάζεται ρητό flag για τη
+  // δρομολόγηση της κατηγορίας εγγράφων (αυτο-υπογραφή, ΥΔ-ΖΕΠ ενηλίκων).
+  ensureColumn('students', 'enilikas', "TEXT NOT NULL DEFAULT 'Όχι'")
   ensureColumn('students', 'deletion_reason', 'TEXT')
   // Χειροκίνητος χρωματικός κωδικός γραμμής (color code) ανά μαθητή — ώστε διαφορετικοί
   // ΣΕΠ στην ίδια δομή να ξεχωρίζουν τους μαθητές τους. Αποθηκεύεται ως hex ή NULL.
@@ -108,8 +112,36 @@ async function init(userDataDir) {
     `UPDATE students SET enrolled_at = COALESCE(updated_at, created_at)
       WHERE status='enrolled' AND (enrolled_at IS NULL OR enrolled_at='')`
   )
+  markAdults() // αυτόματη σήμανση ενηλίκων (και για τους ήδη εγγεγραμμένους)
   save()
   return db
+}
+
+// Ηλικία σε έτη από ημερομηνία γέννησης 'DD/MM/YYYY' έως σήμερα (ή null αν δεν αναλύεται).
+function ageFromDisplay(display) {
+  const m = String(display || '').match(/^(\d{2})\/(\d{2})\/(\d{4})$/)
+  if (!m) return null
+  const d = Number(m[1]), mo = Number(m[2]), y = Number(m[3])
+  const now = new Date()
+  let age = now.getFullYear() - y
+  // Αφαίρεση 1 αν δεν έχει «κλείσει» ακόμη τα γενέθλια φέτος.
+  if (now.getMonth() + 1 < mo || (now.getMonth() + 1 === mo && now.getDate() < d)) age--
+  return age
+}
+
+// Σημαίνει ως ενήλικες (enilikas='Ναι') όσους μαθητές είναι ≥18 ετών βάσει σημερινής
+// ημ. − ημ. γέννησης. ΜΟΝΟ αναβάθμιση (ποτέ δεν υποβαθμίζει χειροκίνητες τιμές). Idempotent.
+function markAdults() {
+  if (!db) return
+  const rows = query(
+    `SELECT id, imerominia_gennisis FROM students
+      WHERE enilikas IS NULL OR enilikas <> 'Ναι'`
+  )
+  const ids = rows.filter((r) => { const a = ageFromDisplay(r.imerominia_gennisis); return a != null && a >= 18 }).map((r) => r.id)
+  if (!ids.length) return
+  db.run(`UPDATE students SET enilikas='Ναι' WHERE id IN (${ids.map((n) => Number(n)).join(',')})`)
+  save()
+  return ids.length
 }
 
 // Προσθήκη στήλης σε υπάρχοντα πίνακα αν λείπει (migration).
@@ -185,4 +217,5 @@ module.exports = {
   replaceFromBuffer,
   getAllSettings,
   setSettings,
+  markAdults,
 }

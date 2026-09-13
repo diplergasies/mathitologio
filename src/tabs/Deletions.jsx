@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react'
 import api from '../api'
 import StudentTable from '../components/StudentTable'
+import FyloCell from '../components/FyloCell'
 import { useSelection } from '../useSelection'
 import { Undo2, Users, Trash2, Pencil, Check, X } from 'lucide-react'
 import { isoToDMY } from '../calendarUtils'
@@ -47,7 +48,7 @@ export default function Deletions({ version, bump }) {
     { key: 'patronymo', label: 'Πατρώνυμο', editable: true },
     { key: 'monada', label: 'Μονάδα', editable: true },
     { key: 'dika', label: 'ΔΙΚΑ', editable: true },
-    { key: 'fylo', label: 'Φύλο', editable: true },
+    { key: 'fylo', label: 'Φύλο', render: (s) => <FyloCell student={s} onChanged={bump} /> },
     { key: 'ithageneia', label: 'Ιθαγένεια', editable: true },
     { key: 'imerominia_gennisis', label: 'Ημ. γέννησης', editable: true },
     { key: 'school_name', label: 'Σχολείο' },

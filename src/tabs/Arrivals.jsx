@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react'
 import api from '../api'
 import StudentTable from '../components/StudentTable'
+import FyloCell from '../components/FyloCell'
 import BulkEnrollModal from '../components/BulkEnrollModal'
 import BulkDeleteByDikaModal from '../components/BulkDeleteByDikaModal'
 import ManualArrivalModal from '../components/ManualArrivalModal'
@@ -41,7 +42,7 @@ export default function Arrivals({ version, bump }) {
     { key: 'patronymo', label: 'Πατρώνυμο', editable: true },
     { key: 'monada', label: 'Μονάδα', editable: true },
     { key: 'dika', label: 'ΔΙΚΑ', editable: true },
-    { key: 'fylo', label: 'Φύλο', editable: true },
+    { key: 'fylo', label: 'Φύλο', render: (s) => <FyloCell student={s} onChanged={bump} /> },
     { key: 'imerominia_gennisis', label: 'Ημ. γέννησης', sortable: true, sortAccessor: birthSortValue, editable: true },
     { key: 'ithageneia', label: 'Ιθαγένεια', editable: true },
     { key: 'glossa', label: 'Γλώσσα', editable: true },

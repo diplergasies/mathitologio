@@ -907,7 +907,7 @@ function UpdateSection() {
 }
 
 export default function Settings({ version, bump, emailCheck, onEmailConfigChange }) {
-  const [form, setForm] = useState({ sep: '', nomos: '', domi: '', perif: '' })
+  const [form, setForm] = useState({ sep: '', nomos: '', nomos_gen: '', domi: '', perif: '' })
   const [saved, setSaved] = useState(false)
 
   useEffect(() => {
@@ -916,6 +916,7 @@ export default function Settings({ version, bump, emailCheck, onEmailConfigChang
         setForm({
           sep: s.sep || '',
           nomos: s.nomos || '',
+          nomos_gen: s.nomos_gen || '',
           domi: s.domi || '',
           perif: s.perif || '',
         })
@@ -958,6 +959,7 @@ export default function Settings({ version, bump, emailCheck, onEmailConfigChang
         <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
           {field('sep', 'Ονοματεπώνυμο ΣΕΠ', 'π.χ. Ιωάννης Παπαδόπουλος')}
           {field('nomos', 'Νομός', 'π.χ. Αττικής')}
+          {field('nomos_gen', 'Νομός (γενική)', 'π.χ. Δράμας — για την παρένθεση επιτρόπου')}
           <div className="sm:col-span-2">
             {field('perif', 'Περιφερειακή Διεύθυνση Εκπαίδευσης', 'Ανατολικής Μακεδονίας & Θράκης')}
           </div>

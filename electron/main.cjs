@@ -1,6 +1,6 @@
 'use strict'
 
-const { app, BrowserWindow, ipcMain, dialog, shell, safeStorage } = require('electron')
+const { app, BrowserWindow, ipcMain, dialog, shell, safeStorage, session } = require('electron')
 const fs = require('fs')
 const path = require('path')
 
@@ -127,6 +127,7 @@ function buildDocData(s, cfg) {
     'Επίτροπος': s.epitropos,
     'ΣΕΠ': cfg.sep || '',
     'Νομός': cfg.nomos || '',
+    'Νομός.γεν': cfg.nomos_gen || cfg.nomos || '',
     'Δομή': cfg.domi || '',
     'PERIF': cfg.perif || '',
     'DATE': todayDisplay(),
@@ -135,7 +136,7 @@ function buildDocData(s, cfg) {
 }
 
 // Όλα τα tokens που γεμίζει η εφαρμογή (για προειδοποίηση άγνωστων σε πρότυπα χρήστη).
-const KNOWN_TOKENS = Object.keys(buildDocData({}, {})).concat(['signee', 'signee.prop'])
+const KNOWN_TOKENS = Object.keys(buildDocData({}, {})).concat(['signee', 'signee.prop', 'signee.note', 'signee.sign'])
 
 // Prefix που δηλώνει token «ζήτα το κατά την έκδοση & θυμήσου το» (π.χ. {{?Διεύθυνση}}).
 // Αν χρειαστεί αλλαγή, αρκεί αυτή η γραμμή (+ η τεκμηρίωση σε Βοήθεια/ιστοσελίδα).
@@ -145,10 +146,11 @@ const askKey = (label) => 'ask:' + String(label).trim()
 const askLabel = (token) => token.slice(ASK_PREFIX.length).trim()
 
 // Υπολογισμός υπογράφοντα ({{signee}}, {{signee.prop}}) βάσει της επιλογής του χρήστη.
-// choice: { type: 'father'|'mother'|'sep'|'other', name?, prop? }
+// choice: { type: 'father'|'mother'|'sep'|'guardian'|'self'|'other', name?, prop? }
 function computeSignee(s, cfg, choice) {
   const surname = s.eponymo || ''
   if (!choice) return { signee: '', prop: '' }
+  const isFemale = /θηλ/i.test(String(s.fylo || ''))
   switch (choice.type) {
     case 'father':
       return { signee: `${s.patronymo || ''} ${surname}`.trim(), prop: 'πατέρας' }
@@ -156,11 +158,28 @@ function computeSignee(s, cfg, choice) {
       return { signee: `${s.mitronymo || ''} ${surname}`.trim(), prop: 'μητέρα' }
     case 'sep':
       return { signee: cfg.sep || '', prop: 'ΣΕΠ' }
+    case 'guardian':
+      // Επίτροπος ασυνόδευτου ανηλίκου· το όνομα δίνεται ελεύθερα (name).
+      return { signee: choice.name || '', prop: 'επίτροπος' }
+    case 'self':
+      // Ενήλικας μαθητής που υπογράφει για τον εαυτό του.
+      return { signee: `${s.onoma || ''} ${surname}`.trim(), prop: isFemale ? 'η δηλούσα' : 'ο δηλών' }
     case 'other':
       return { signee: choice.name || '', prop: choice.prop || '' }
     default:
       return { signee: '', prop: '' }
   }
+}
+
+// Παρένθεση κάτω από την υπογραφή, ΜΟΝΟ όταν υπογράφει ο ΣΕΠ (ασυνόδευτος χωρίς επίτροπο).
+// Γεμίζει το token {{signee.note}} — αλλιώς κενό. Ο νομός σε γενική από ρύθμιση nomos_gen
+// (fallback στο υπάρχον nomos, το οποίο ίσως είναι ήδη σε γενική).
+function computeSigneeNote(cfg, choice) {
+  if (!choice || choice.type !== 'sep') return ''
+  const nomosGen = (cfg.nomos_gen || cfg.nomos || '').trim()
+  return nomosGen
+    ? `Σε αναμονή ορισμού επιτρόπου από την Εισαγγελία νομού ${nomosGen}`
+    : 'Σε αναμονή ορισμού επιτρόπου από την Εισαγγελία'
 }
 
 let mainWindow = null
@@ -355,6 +374,7 @@ function insertRecords(filePath, parsed, meta = {}) {
     .query("SELECT * FROM students WHERE status IN ('arrival','enrolled') AND dika != ''")
     .filter((s) => !fileDikas.has(norm(s.dika)))
 
+  db.markAdults() // αυτόματη σήμανση ενηλίκων στους νεοεισαχθέντες
   return { canceled: false, imported, excluded, duplicates, totalRows, missingFields, batchId, departed }
 }
 
@@ -511,6 +531,7 @@ ipcMain.handle('students:addManual', (_e, f = {}) => {
       $now: now,
     }
   )
+  db.markAdults() // σήμανση «Ενήλικας» αν ≥18 (σημερινή − ημ. γέννησης)
   return { ok: true, id, computed: `${cls.category} · ${cls.grade}` }
 })
 
@@ -620,7 +641,7 @@ ipcMain.handle('students:restore', (_e, id) => {
 const EDITABLE_TEXT_COLS = [
   'monada', 'dika', 'onoma', 'eponymo', 'patronymo', 'mitronymo',
   'fylo', 'glossa', 'ithageneia',
-  'epitropos', 'asynodeftos', 'eidiki_agogi', 'current_grade',
+  'epitropos', 'asynodeftos', 'eidiki_agogi', 'enilikas', 'current_grade',
 ]
 
 ipcMain.handle('students:update', (_e, { id, fields }) => {
@@ -1160,6 +1181,7 @@ ipcMain.handle('documents:bulkGenerate', async (_e, { ids = [], templateFiles = 
       const sg = computeSignee(s, cfg, choice)
       data['signee'] = sg.signee
       data['signee.prop'] = sg.prop
+      data['signee.sign'] = '' // γραμμή υπογραφής κενή (μαζική)· όνομα χωριστά ({{signee}})
     }
     for (const tf of templateFiles) {
       const templatePath = resolveTemplatePath(tf)
@@ -1382,6 +1404,7 @@ ipcMain.handle('documents:generate', async (_e, { id, templateFile, signee, extr
     const sg = computeSignee(s, cfg, signee)
     data['signee'] = sg.signee
     data['signee.prop'] = sg.prop
+    data['signee.sign'] = '' // γραμμή υπογραφής κενή στην ατομική έκδοση· το όνομα τυπώνεται χωριστά ({{signee}})
   }
   // Ελεύθερα πεδία που συμπλήρωσε ο χρήστης (π.χ. σχολείο προέλευσης/προορισμού σε
   // αίτηση μετεγγραφής) — αντιστοιχούν σε «άγνωστα» tokens του προτύπου.
@@ -1423,6 +1446,158 @@ ipcMain.handle('documents:generate', async (_e, { id, templateFile, signee, extr
   // Εμφάνιση στον explorer/finder (ΧΩΡΙΣ να ανοίξει το LibreOffice).
   shell.showItemInFolder(filePath)
   return { ok: true, path: filePath }
+})
+
+// Καθαρισμός ονόματος αρχείου/φακέλου από μη έγκυρους χαρακτήρες.
+function sanitizeName(x) {
+  return String(x == null ? '' : x)
+    .replace(/[\\/:*?"<>|]+/g, '_')
+    .replace(/\s+/g, ' ')
+    .trim()
+}
+
+// dataURL (π.χ. 'data:image/png;base64,...') -> { buffer, ext } ή null.
+function decodeDataUrl(dataUrl) {
+  const m = String(dataUrl || '').match(/^data:image\/(png|jpe?g|webp);base64,(.+)$/s)
+  if (!m) return null
+  const ext = m[1] === 'jpeg' ? 'jpg' : m[1]
+  return { buffer: Buffer.from(m[2], 'base64'), ext }
+}
+
+// Παραγωγή ΟΛΟΚΛΗΡΟΥ πακέτου εγγραφής ενός μαθητή σε φάκελο <Όνομα>_<Επώνυμο>_<ΔΙΚΑ>:
+// όλα τα έγγραφα της κατηγορίας (με signee/υπογραφή/παρένθεση) + το ταυτοποιητικό.
+// payload: {
+//   studentId, category,
+//   docs: [{ templateFile, signee?, extras?, signature?:{dataUrl,wPx,hPx} }],
+//   identity?: { dataUrl },
+//   baseDir?           // αλλιώς από ρύθμιση package_dir ή προεπιλογή στα Έγγραφα
+// }
+ipcMain.handle('documents:generatePackage', async (_e, payload) => {
+  const { studentId, category, docs, identity, identitySigner, baseDir } = payload || {}
+  const rows = db.query(
+    `SELECT s.*, sc.name AS school_name, sc.type AS school_type
+       FROM students s LEFT JOIN schools sc ON sc.id = s.school_id
+      WHERE s.id=$id`,
+    { $id: studentId }
+  )
+  if (!rows.length) return { error: 'Δεν βρέθηκε ο μαθητής' }
+  const s = rows[0]
+  const cfg = db.getAllSettings()
+
+  // Βασικός φάκελος πακέτων: override → ρύθμιση → προεπιλογή στα Έγγραφα.
+  const base = baseDir || cfg.package_dir || path.join(app.getPath('documents'), 'Πακέτα εγγραφής')
+  const folderName = sanitizeName(`${s.onoma || ''}_${s.eponymo || ''}_${s.dika || ''}`)
+  const dir = path.join(base, folderName)
+  try {
+    fs.mkdirSync(dir, { recursive: true })
+  } catch (err) {
+    return { error: `Αδυναμία δημιουργίας φακέλου: ${err.message}` }
+  }
+
+  const generated = []
+  const warnings = []
+  const remember = {}
+
+  for (const doc of docs || []) {
+    const templatePath = resolveTemplatePath(doc.templateFile)
+    if (!fs.existsSync(templatePath)) {
+      warnings.push(`Λείπει το πρότυπο: ${doc.templateFile}`)
+      continue
+    }
+    const data = buildDocData(s, cfg)
+    // Παρένθεση ΣΕΠ μόνο όταν υπογράφει ο ΣΕΠ (εξαρτάται από τον υπογράφοντα, όχι την κατηγορία).
+    const note = computeSigneeNote(cfg, doc.signee)
+    let images
+    if (doc.signee) {
+      const sg = computeSignee(s, cfg, doc.signee)
+      data['signee'] = sg.signee // όνομα (κείμενο) — στο σώμα & κάτω από την υπογραφή
+      data['signee.prop'] = sg.prop
+      data['signee.sign'] = '' // γραμμή υπογραφής: κενή (fallback) ή εικόνα (παρακάτω)
+      data['signee.note'] = note
+      // Χειρόγραφη υπογραφή: εικόνα στη γραμμή υπογραφής {{signee.sign}} (το όνομα τυπώνεται από κάτω).
+      const sig = doc.signature && decodeDataUrl(doc.signature.dataUrl)
+      if (sig) {
+        images = { 'signee.sign': { pngBuffer: sig.buffer, wPx: doc.signature.wPx, hPx: doc.signature.hPx } }
+      }
+    } else {
+      data['signee.note'] = note
+    }
+    if (doc.extras && typeof doc.extras === 'object') {
+      for (const [k, v] of Object.entries(doc.extras)) {
+        if (v == null) continue
+        data[k] = String(v)
+        if (k.startsWith(ASK_PREFIX) && String(v).trim()) remember[askKey(askLabel(k))] = String(v)
+      }
+    }
+
+    let pdfPath
+    try {
+      pdfPath = documents.generate({
+        templatePath,
+        data,
+        images,
+        resourcesPath: isDev ? null : process.resourcesPath,
+        isDev,
+        userDataPath: app.getPath('userData'),
+      })
+    } catch (err) {
+      warnings.push(`${doc.templateFile}: ${err.message}`)
+      continue
+    }
+    const outName = sanitizeName(doc.templateFile.replace(/\.(pptx|docx)$/i, '')) + '.pdf'
+    const dest = path.join(dir, outName)
+    try {
+      fs.copyFileSync(pdfPath, dest)
+      generated.push(outName)
+    } catch (err) {
+      warnings.push(`${doc.templateFile}: ${err.message}`)
+    }
+  }
+
+  // Ταυτοποιητικό μαθητή (μία όψη, εικόνα).
+  if (identity && identity.dataUrl) {
+    const img = decodeDataUrl(identity.dataUrl)
+    if (img) {
+      try {
+        fs.writeFileSync(path.join(dir, `Ταυτοποιητικό.${img.ext}`), img.buffer)
+        generated.push(`Ταυτοποιητικό.${img.ext}`)
+      } catch (err) {
+        warnings.push(`Ταυτοποιητικό: ${err.message}`)
+      }
+    } else {
+      warnings.push('Το ταυτοποιητικό δεν αναγνωρίστηκε ως εικόνα.')
+    }
+  }
+
+  // Ταυτοποιητικό υπογράφοντα (γονέα/συγγενή) — μόνο στην κατηγορία «οικογένεια».
+  if (identitySigner && identitySigner.dataUrl) {
+    const img = decodeDataUrl(identitySigner.dataUrl)
+    if (img) {
+      try {
+        fs.writeFileSync(path.join(dir, `Ταυτοποιητικό υπογράφοντα.${img.ext}`), img.buffer)
+        generated.push(`Ταυτοποιητικό υπογράφοντα.${img.ext}`)
+      } catch (err) {
+        warnings.push(`Ταυτοποιητικό υπογράφοντα: ${err.message}`)
+      }
+    } else {
+      warnings.push('Το ταυτοποιητικό υπογράφοντα δεν αναγνωρίστηκε ως εικόνα.')
+    }
+  }
+
+  if (Object.keys(remember).length) db.setSettings(remember)
+  shell.openPath(dir)
+  return { ok: true, path: dir, generated, warnings }
+})
+
+ipcMain.handle('package:chooseFolder', async () => {
+  const { canceled, filePaths } = await dialog.showOpenDialog({
+    title: 'Επιλογή φακέλου για τα πακέτα εγγραφής',
+    properties: ['openDirectory', 'createDirectory'],
+    defaultPath:
+      db.getAllSettings().package_dir || path.join(app.getPath('documents'), 'Πακέτα εγγραφής'),
+  })
+  if (canceled || !filePaths.length) return { canceled: true }
+  return { path: filePaths[0] }
 })
 
 ipcMain.handle('backup:export', async () => {
@@ -1824,6 +1999,18 @@ function warmUpLibreOffice() {
 
 app.whenReady().then(async () => {
   await db.init(app.getPath('userData'))
+
+  // Άδεια χρήσης κάμερας (λήψη ταυτοποιητικού). Επιτρέπουμε ΜΟΝΟ 'media'· ό,τι άλλο
+  // απορρίπτεται. Απαραίτητο γιατί δεν υπάρχει άλλος handler → default συμπεριφορά.
+  try {
+    session.defaultSession.setPermissionRequestHandler((_wc, permission, cb) => {
+      cb(permission === 'media')
+    })
+    session.defaultSession.setPermissionCheckHandler((_wc, permission) => permission === 'media')
+  } catch (e) {
+    console.error('permission handler', e)
+  }
+
   createWindow()
   warmUpLibreOffice() // fire-and-forget· δεν μπλοκάρει την εκκίνηση
   // Αυτόματο backup στο άνοιγμα, αν έχει περάσει η περίοδος που όρισε ο χρήστης.

@@ -2,21 +2,24 @@ import { useEffect, useState } from 'react'
 import api from '../api'
 import StudentTable from '../components/StudentTable'
 import DocumentModal from '../components/DocumentModal'
+import RegistrationPackageModal from '../components/RegistrationPackageModal'
 import BulkDocumentModal from '../components/BulkDocumentModal'
 import BulkDeleteByDikaModal from '../components/BulkDeleteByDikaModal'
 import DeleteReasonModal from '../components/DeleteReasonModal'
 import ExportStudentsModal from '../components/ExportStudentsModal'
 import SchoolCell from '../components/SchoolCell'
 import GradeCell from '../components/GradeCell'
+import FyloCell from '../components/FyloCell'
 import LastImportBadge from '../components/LastImportBadge'
 import { useSelection } from '../useSelection'
 import { birthSortValue } from '../sort'
 import { isoToDMY } from '../calendarUtils'
-import { FileText, Trash2, Users, Hash, FileSpreadsheet } from 'lucide-react'
+import { FileText, Trash2, Users, Hash, FileSpreadsheet, FolderArchive } from 'lucide-react'
 
 export default function Students({ version, bump }) {
   const [students, setStudents] = useState([])
   const [docFor, setDocFor] = useState(null)
+  const [pkgFor, setPkgFor] = useState(null)
   const [bulkDoc, setBulkDoc] = useState(false)
   const [dikaDelete, setDikaDelete] = useState(false)
   const [delFor, setDelFor] = useState(null) // μαθητής προς διαγραφή (single)
@@ -44,6 +47,11 @@ export default function Students({ version, bump }) {
     bump()
   }
 
+  async function toggleEnilikas(s) {
+    await api.updateStudent(s.id, { enilikas: s.enilikas === 'Ναι' ? 'Όχι' : 'Ναι' })
+    bump()
+  }
+
   async function saveCell(id, key, value) {
     await api.updateStudent(id, { [key]: value })
     bump()
@@ -61,7 +69,7 @@ export default function Students({ version, bump }) {
     { key: 'patronymo', label: 'Πατρώνυμο', editable: true },
     { key: 'monada', label: 'Μονάδα', editable: true },
     { key: 'dika', label: 'ΔΙΚΑ', editable: true },
-    { key: 'fylo', label: 'Φύλο', editable: true },
+    { key: 'fylo', label: 'Φύλο', render: (s) => <FyloCell student={s} onChanged={bump} /> },
     { key: 'ithageneia', label: 'Ιθαγένεια', editable: true },
     { key: 'imerominia_gennisis', label: 'Ημ. γέννησης', sortable: true, sortAccessor: birthSortValue, editable: true },
     {
@@ -127,6 +135,20 @@ export default function Students({ version, bump }) {
         </button>
       ),
     },
+    {
+      key: 'enilikas',
+      label: 'Ενήλικας',
+      render: (s) => (
+        <button
+          onClick={() => toggleEnilikas(s)}
+          className={`rounded px-2 py-0.5 text-xs font-medium ${
+            s.enilikas === 'Ναι' ? 'bg-sky-100 text-sky-700' : 'bg-slate-100 text-slate-500'
+          }`}
+        >
+          {s.enilikas || 'Όχι'}
+        </button>
+      ),
+    },
   ]
 
   return (
@@ -187,6 +209,13 @@ export default function Students({ version, bump }) {
         renderActions={(s) => (
           <>
             <button
+              onClick={() => setPkgFor(s)}
+              title="Πακέτο εγγραφής"
+              className="rounded-md border border-indigo-200 p-1 text-indigo-600 hover:bg-indigo-50"
+            >
+              <FolderArchive size={14} />
+            </button>
+            <button
               onClick={() => setDocFor(s)}
               title="Έκδοση εγγράφων"
               className="rounded-md border border-blue-200 p-1 text-blue-600 hover:bg-blue-50"
@@ -204,6 +233,7 @@ export default function Students({ version, bump }) {
         )}
       />
 
+      {pkgFor && <RegistrationPackageModal student={pkgFor} onClose={() => setPkgFor(null)} />}
       {docFor && <DocumentModal student={docFor} onClose={() => setDocFor(null)} />}
       {bulkDoc && (
         <BulkDocumentModal

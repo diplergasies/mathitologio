@@ -27,13 +27,103 @@ function targetXmlPattern(ext) {
   return /ppt\/(slides|notesSlides|slideLayouts|slideMasters)\/.*\.xml$/
 }
 
+// Μετατροπή pixel -> EMU (English Metric Units): 1 px @96dpi = 9525 EMU.
+const EMU_PER_PX = 9525
+
+// Παράγει το inline DrawingML (<w:drawing>) για ένθεση εικόνας μέσα σε παράγραφο Word.
+// Δηλώνει τα namespaces πάνω στο <wp:inline> ώστε να είναι αυτόνομο (να μην εξαρτάται από
+// τυχόν δηλώσεις στο <w:document>). rid = το relationship id προς το media αρχείο.
+function buildDrawingXml(rid, id, cx, cy) {
+  const A = 'http://schemas.openxmlformats.org/drawingml/2006/main'
+  const PIC = 'http://schemas.openxmlformats.org/drawingml/2006/picture'
+  const WP = 'http://schemas.openxmlformats.org/drawingml/2006/wordprocessingDrawing'
+  const R = 'http://schemas.openxmlformats.org/officeDocument/2006/relationships'
+  return (
+    `<w:drawing>` +
+    `<wp:inline xmlns:wp="${WP}" xmlns:a="${A}" xmlns:pic="${PIC}" xmlns:r="${R}" distT="0" distB="0" distL="0" distR="0">` +
+    `<wp:extent cx="${cx}" cy="${cy}"/>` +
+    `<wp:effectExtent l="0" t="0" r="0" b="0"/>` +
+    `<wp:docPr id="${id}" name="signature_${id}"/>` +
+    `<wp:cNvGraphicFramePr><a:graphicFrameLocks noChangeAspect="1"/></wp:cNvGraphicFramePr>` +
+    `<a:graphic><a:graphicData uri="${PIC}">` +
+    `<pic:pic>` +
+    `<pic:nvPicPr><pic:cNvPr id="${id}" name="signature_${id}"/><pic:cNvPicPr/></pic:nvPicPr>` +
+    `<pic:blipFill><a:blip r:embed="${rid}"/><a:stretch><a:fillRect/></a:stretch></pic:blipFill>` +
+    `<pic:spPr><a:xfrm><a:off x="0" y="0"/><a:ext cx="${cx}" cy="${cy}"/></a:xfrm>` +
+    `<a:prstGeom prst="rect"><a:avLst/></a:prstGeom></pic:spPr>` +
+    `</pic:pic>` +
+    `</a:graphicData></a:graphic>` +
+    `</wp:inline>` +
+    `</w:drawing>`
+  )
+}
+
+// Εξασφαλίζει ότι το [Content_Types].xml δηλώνει το png (χρειάζεται για ενσωματωμένες εικόνες).
+function ensurePngContentType(zip) {
+  const ct = zip.file('[Content_Types].xml')
+  if (!ct) return
+  let xml = ct.asText()
+  if (/Extension="png"/i.test(xml)) return
+  xml = xml.replace(/<\/Types>\s*$/, '<Default Extension="png" ContentType="image/png"/></Types>')
+  zip.file('[Content_Types].xml', xml)
+}
+
+// Προσθέτει relationship εικόνας στο word/_rels/document.xml.rels (δημιουργεί το αρχείο αν λείπει).
+function addImageRelationship(zip, rid, target) {
+  const relPath = 'word/_rels/document.xml.rels'
+  const rel =
+    `<Relationship Id="${rid}" ` +
+    `Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/image" ` +
+    `Target="${target}"/>`
+  const existing = zip.file(relPath)
+  if (existing) {
+    let xml = existing.asText()
+    xml = xml.replace(/<\/Relationships>\s*$/, rel + '</Relationships>')
+    zip.file(relPath, xml)
+  } else {
+    zip.file(
+      relPath,
+      `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>` +
+        `<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">` +
+        rel +
+        `</Relationships>`
+    )
+  }
+}
+
+// Αντικαθιστά ένα {{token}} μέσα στο word/document.xml με ενσωματωμένη εικόνα (inline drawing).
+// Σπάει το τρέχον run: κλείνει το κείμενο, παρεμβάλλει run με το drawing, ξανανοίγει run κειμένου.
+// Επιστρέφει το τροποποιημένο xml (ή το ίδιο αν δεν βρέθηκε το token).
+function insertImageToken(zip, xml, token, img, seq) {
+  const re = new RegExp(`\\{\\{\\s*${escapeRegExp(token)}\\s*\\}\\}`, 'g')
+  if (!re.test(xml)) return xml
+  const wPx = Number(img.wPx) > 0 ? Number(img.wPx) : 200
+  const hPx = Number(img.hPx) > 0 ? Number(img.hPx) : 80
+  const cx = Math.round(wPx * EMU_PER_PX)
+  const cy = Math.round(hPx * EMU_PER_PX)
+  const rid = `rIdSig${seq}`
+  const mediaName = `sig_${seq}.png`
+  zip.file(`word/media/${mediaName}`, img.pngBuffer)
+  addImageRelationship(zip, rid, `media/${mediaName}`)
+  ensurePngContentType(zip)
+  const drawing = buildDrawingXml(rid, 1000 + seq, cx, cy)
+  // Κλείσιμο του τρέχοντος <w:t>/<w:r>, run με το drawing, εκ νέου άνοιγμα run κειμένου.
+  const replacement =
+    `</w:t></w:r><w:r>${drawing}</w:r><w:r><w:t xml:space="preserve">`
+  return xml.replace(re, replacement)
+}
+
 // Συμπληρώνει ένα .pptx ή .docx template αντικαθιστώντας {{TOKEN}} με τιμές.
-// data: { TOKEN: value, ... }. Επιστρέφει το path του προσωρινού filled αρχείου.
-function fillTemplate(templatePath, data, outDir) {
+// data: { TOKEN: value, ... }. images (προαιρετικό, μόνο .docx): { TOKEN: { pngBuffer, wPx, hPx } }
+// — τα tokens αυτά αντικαθίστανται με ενσωματωμένη (transparent) εικόνα στη θέση τους (π.χ.
+// χειρόγραφη υπογραφή πάνω στο {{signee}}). Επιστρέφει το path του προσωρινού filled αρχείου.
+function fillTemplate(templatePath, data, outDir, images) {
   const ext = path.extname(templatePath).toLowerCase()
   const content = fs.readFileSync(templatePath)
   const zip = new PizZip(content)
   const pattern = targetXmlPattern(ext)
+  const imgTokens = images && ext === '.docx' ? Object.keys(images) : []
+  let imgSeq = 0
 
   Object.keys(zip.files)
     .filter((name) => pattern.test(name))
@@ -43,7 +133,15 @@ function fillTemplate(templatePath, data, outDir) {
       // 1) "Επιδιόρθωση" placeholders σπασμένων σε πολλά runs: αφαίρεση tags μέσα σε {{ ... }}.
       xml = xml.replace(/\{\{[\s\S]*?\}\}/g, (m) => m.replace(/<[^>]+>/g, ''))
 
-      // 2) Αντικατάσταση των tokens.
+      // 2) Εικόνες (μόνο στο σώμα του εγγράφου): ένθεση ΠΡΙΝ την αντικατάσταση κειμένου,
+      //    ώστε το token να «καταναλωθεί» από την εικόνα και να μη γεμίσει με κείμενο.
+      if (imgTokens.length && name === 'word/document.xml') {
+        for (const token of imgTokens) {
+          xml = insertImageToken(zip, xml, token, images[token], ++imgSeq)
+        }
+      }
+
+      // 3) Αντικατάσταση των tokens (τα image-tokens που τυχόν απέμειναν αλλού → κενό/τιμή).
       for (const [token, value] of Object.entries(data)) {
         const re = new RegExp(`\\{\\{\\s*${escapeRegExp(token)}\\s*\\}\\}`, 'g')
         xml = xml.replace(re, xmlEscape(value))
@@ -198,9 +296,9 @@ function convertToPdf(srcPath, outDir, soffice, profileDir) {
 }
 
 // Πλήρης ροή: γέμισμα template + μετατροπή σε PDF. Επιστρέφει το path του PDF.
-function generate({ templatePath, data, resourcesPath, isDev, userDataPath }) {
+function generate({ templatePath, data, resourcesPath, isDev, userDataPath, images }) {
   const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'mathitologio_'))
-  const filled = fillTemplate(templatePath, data, tmpDir)
+  const filled = fillTemplate(templatePath, data, tmpDir, images)
   const soffice = findSoffice(resourcesPath, isDev)
   // Persistent προφίλ LibreOffice μέσα στο userData (όταν τρέχουμε σε Electron),
   // ώστε να μη δημιουργείται νέο προφίλ σε κάθε έκδοση εγγράφου.

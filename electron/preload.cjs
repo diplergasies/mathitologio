@@ -39,6 +39,8 @@ contextBridge.exposeInMainWorld('api', {
   openTemplatesFolder: () => ipcRenderer.invoke('templates:openFolder'),
   generateDocument: (id, templateFile, signee, extras) =>
     ipcRenderer.invoke('documents:generate', { id, templateFile, signee, extras }),
+  generatePackage: (payload) => ipcRenderer.invoke('documents:generatePackage', payload),
+  choosePackageFolder: () => ipcRenderer.invoke('package:chooseFolder'),
 
   bulkDelete: (ids, reason) => ipcRenderer.invoke('students:bulkDelete', { ids, reason }),
   bulkRestore: (ids) => ipcRenderer.invoke('students:bulkRestore', ids),
