@@ -4,36 +4,27 @@ import api from '../api'
 import SigneePicker, { signeeValid } from './SigneePicker'
 import SignaturePad from './SignaturePad'
 import CameraCapture from './CameraCapture'
+import { loadPackages } from '../lib/registrationPackages'
 import { FolderCog, Loader2, FileText, AlertTriangle } from 'lucide-react'
-
-// Ονόματα προτύπων ανά κατηγορία (ίδια με τα αρχεία στο resources/templates).
-const T = {
-  aitisi: 'Αίτηση εγγραφής.docx',
-  aitisiEnilikon: 'Αίτηση εγγραφής ενηλίκων.docx',
-  yd: 'ΥΔ-ΖΕΠ.docx',
-  ydEnilikon: 'ΥΔ-ΖΕΠ ενηλίκων.docx',
-  adym: 'ΑΔΥΜ.pptx',
-}
-
-const CATEGORIES = [
-  { key: 'minor', label: 'Ανήλικος', signer: 'minor', docs: [T.aitisi, T.yd, T.adym] },
-  { key: 'adult', label: 'Ενήλικας', signer: 'self', docs: [T.aitisiEnilikon, T.ydEnilikon, T.adym] },
-]
 
 // Αρχική επιλογή υπογράφοντα (ανήλικοι): ασυνόδευτος → ΣΕΠ, αλλιώς Πατέρας.
 function defaultChoice(s) {
   return s && s.asynodeftos === 'Ναι' ? { type: 'sep' } : { type: 'father' }
 }
 
-function suggestCategory(s) {
-  return s.enilikas === 'Ναι' ? 'adult' : 'minor'
+// Προτεινόμενο πακέτο βάσει ηλικίας: ενήλικας → 'adult' (αν υπάρχει), αλλιώς 'minor', αλλιώς το 1ο.
+function suggestCategory(s, packages) {
+  const wanted = s.enilikas === 'Ναι' ? 'adult' : 'minor'
+  if (packages.some((p) => p.id === wanted)) return wanted
+  return (packages[0] && packages[0].id) || wanted
 }
 
 export default function RegistrationPackageModal({ student, onClose }) {
   const [templates, setTemplates] = useState([])
   const [schools, setSchools] = useState([])
   const [settings, setSettings] = useState({})
-  const [category, setCategory] = useState(suggestCategory(student))
+  const [packages, setPackages] = useState([])
+  const [category, setCategory] = useState(null)
   const [choice, setChoice] = useState(() => defaultChoice(student))
   const [signature, setSignature] = useState(null) // { dataUrl, wPx, hPx } | null
   const [identity, setIdentity] = useState(null) // ταυτοποιητικό μαθητή (dataUrl | null)
@@ -45,18 +36,25 @@ export default function RegistrationPackageModal({ student, onClose }) {
   useEffect(() => {
     api.listTemplates().then((t) => setTemplates(t || []))
     api.listSchools().then((s) => setSchools(s || []))
-    api.getSettings().then((s) => setSettings(s || {}))
-  }, [])
+    api.getSettings().then((s) => {
+      const st = s || {}
+      setSettings(st)
+      const pkgs = loadPackages(st)
+      setPackages(pkgs)
+      setCategory(suggestCategory(student, pkgs))
+    })
+  }, []) // eslint-disable-line react-hooks/exhaustive-deps
 
-  const cat = CATEGORIES.find((c) => c.key === category)
+  const cat = packages.find((c) => c.id === category) || null
 
   // Ανάλυση των προτύπων της κατηγορίας -> meta (ή null αν λείπει).
   const docMetas = useMemo(
-    () => cat.docs.map((file) => ({ file, meta: templates.find((t) => t.file === file) || null })),
+    () => (cat ? cat.docs.map((file) => ({ file, meta: templates.find((t) => t.file === file) || null })) : []),
     [cat, templates]
   )
   const missing = docMetas.filter((d) => !d.meta).map((d) => d.file)
-  const signeeDocs = docMetas.filter((d) => d.meta && d.meta.needsSignee)
+  // Πακέτο «χωρίς υπογραφή» → καμία διαχείριση υπογράφοντα, ακόμη κι αν κάποιο πρότυπο έχει {{signee}}.
+  const signeeDocs = cat && cat.signer !== 'none' ? docMetas.filter((d) => d.meta && d.meta.needsSignee) : []
 
   // Ελεύθερα πεδία (ask/unknown tokens) των εγγράφων που έχουν signee.
   const fields = useMemo(() => {
@@ -86,6 +84,7 @@ export default function RegistrationPackageModal({ student, onClose }) {
 
   // Χτίσιμο του signer choice ανά κατηγορία.
   const builtChoice = useMemo(() => {
+    if (!cat) return null
     if (cat.signer === 'minor') return choice
     if (cat.signer === 'self') return { type: 'self' }
     return null
@@ -157,22 +156,23 @@ export default function RegistrationPackageModal({ student, onClose }) {
         <strong>{student.eponymo} {student.onoma}</strong> — ΔΙΚΑ {student.dika || '—'}
       </p>
 
-      {/* 1) Κατηγορία */}
+      {/* 1) Πακέτο */}
       <div className="mb-4">
-        <p className="mb-1 text-sm font-medium text-slate-700">Κατηγορία μαθητή</p>
+        <p className="mb-1 text-sm font-medium text-slate-700">Πακέτο εγγράφων</p>
         <div className="space-y-1.5">
-          {CATEGORIES.map((c) => (
+          {packages.map((c) => (
             <label
-              key={c.key}
+              key={c.id}
               className={`flex cursor-pointer items-center gap-2 rounded-md border p-2 text-sm ${
-                category === c.key ? 'border-blue-500 bg-blue-50' : 'border-slate-200'
+                category === c.id ? 'border-blue-500 bg-blue-50' : 'border-slate-200'
               }`}
             >
-              <input type="radio" checked={category === c.key} onChange={() => setCategory(c.key)} />
+              <input type="radio" checked={category === c.id} onChange={() => setCategory(c.id)} />
               <span>{c.label}</span>
             </label>
           ))}
         </div>
+        <p className="mt-1 text-xs text-slate-400">Διαχείριση πακέτων από τις Ρυθμίσεις ▸ Πακέτα εγγραφής.</p>
       </div>
 
       {/* 2) Έγγραφα */}
@@ -266,7 +266,7 @@ export default function RegistrationPackageModal({ student, onClose }) {
       </div>
 
       {/* 5β) Ταυτοποιητικό υπογράφοντα — ανήλικος όταν υπογράφει γονέας/συγγενής/άλλος (όχι ΣΕΠ) */}
-      {cat.signer === 'minor' && choice.type !== 'sep' && (
+      {cat && cat.signer === 'minor' && choice.type !== 'sep' && (
         <div className="mb-4">
           <CameraCapture label="Ταυτοποιητικό υπογράφοντα (γονέα/συγγενή)" onChange={setIdentitySigner} />
         </div>

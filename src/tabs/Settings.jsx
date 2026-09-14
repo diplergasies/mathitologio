@@ -3,7 +3,8 @@ import api from '../api'
 import Schools from './Schools'
 import PromotionModal from '../components/PromotionModal'
 import ResetDataModal from '../components/ResetDataModal'
-import { UserCog, Save, School, CalendarRange, GraduationCap, DatabaseBackup, FolderOpen, Play, FileText, FilePlus2, Trash2, AlertTriangle, Mail, RefreshCw, KeyRound, Search, HelpCircle } from 'lucide-react'
+import { UserCog, Save, School, CalendarRange, GraduationCap, DatabaseBackup, FolderOpen, Play, FileText, FilePlus2, Trash2, AlertTriangle, Mail, RefreshCw, KeyRound, Search, HelpCircle, FolderArchive, Plus, CalendarPlus } from 'lucide-react'
+import { loadPackages, defaultPackages, SIGNER_LABELS } from '../lib/registrationPackages'
 
 // Βαθμίδες με σταθερό κλειδί `type` (ίδιο με το backend) και ετικέτα εμφάνισης.
 const BAND_DEFS = [
@@ -599,6 +600,135 @@ function TemplatesSection() {
   )
 }
 
+// Διαχείριση πακέτων εγγραφής: δημιουργία/επεξεργασία/διαγραφή, προσθαφαίρεση προτύπων.
+function PackagesSection() {
+  const [packages, setPackages] = useState([])
+  const [templates, setTemplates] = useState([]) // [{ file, label, ... }]
+  const [msg, setMsg] = useState(null) // { text, type }
+
+  useEffect(() => {
+    api.getSettings().then((s) => setPackages(loadPackages(s || {})))
+    api.listTemplates().then((r) => setTemplates(Array.isArray(r) ? r : []))
+  }, [])
+
+  // Αποθήκευση + ενημέρωση state.
+  async function persist(next) {
+    setPackages(next)
+    await api.setSettings({ registration_packages: JSON.stringify(next) })
+    setMsg({ text: 'Αποθηκεύτηκε ✓', type: 'ok' })
+  }
+
+  const updatePkg = (id, patch) => persist(packages.map((p) => (p.id === id ? { ...p, ...patch } : p)))
+
+  function toggleDoc(id, file) {
+    const p = packages.find((x) => x.id === id)
+    if (!p) return
+    const docs = p.docs.includes(file) ? p.docs.filter((f) => f !== file) : [...p.docs, file]
+    updatePkg(id, { docs })
+  }
+
+  function addPackage() {
+    const id = 'pkg-' + Date.now().toString(36)
+    persist([...packages, { id, label: 'Νέο πακέτο', signer: 'minor', docs: [] }])
+  }
+
+  function removePackage(id) {
+    if (!confirm('Διαγραφή αυτού του πακέτου;')) return
+    persist(packages.filter((p) => p.id !== id))
+  }
+
+  function resetDefaults() {
+    if (!confirm('Επαναφορά των προεπιλεγμένων πακέτων (Ανήλικος / Ενήλικας); Τα δικά σου πακέτα θα χαθούν.')) return
+    persist(defaultPackages())
+  }
+
+  return (
+    <div className="rounded-lg border border-slate-200 bg-white p-4">
+      <h3 className="mb-1 flex items-center gap-2 font-semibold text-slate-700">
+        <FolderArchive size={18} /> Πακέτα εγγραφής
+      </h3>
+      <p className="mb-3 text-xs text-slate-400">
+        Ομάδες προτύπων που εκδίδονται μαζί από το κουμπί «Πακέτο εγγραφής» κάθε μαθητή. Όρισε ποια
+        πρότυπα περιέχει κάθε πακέτο και ποιος υπογράφει. Τα πρότυπα προστίθενται από «Πρότυπα εγγράφων».
+      </p>
+
+      <div className="mb-3 flex flex-wrap items-center gap-3">
+        <button
+          onClick={addPackage}
+          className="inline-flex items-center gap-1.5 rounded-md bg-blue-600 px-3 py-2 text-sm font-medium text-white hover:bg-blue-700"
+        >
+          <Plus size={16} /> Νέο πακέτο
+        </button>
+        <button
+          onClick={resetDefaults}
+          className="inline-flex items-center gap-1.5 rounded-md border border-slate-300 px-3 py-2 text-sm text-slate-600 hover:bg-slate-50"
+        >
+          <RefreshCw size={16} /> Επαναφορά προεπιλογών
+        </button>
+        {msg && <span className={`text-sm ${msg.type === 'error' ? 'text-red-600' : 'text-green-600'}`}>{msg.text}</span>}
+      </div>
+
+      {packages.length === 0 ? (
+        <p className="rounded-md bg-slate-50 p-3 text-sm text-slate-400">Δεν υπάρχουν πακέτα.</p>
+      ) : (
+        <div className="space-y-3">
+          {packages.map((p) => (
+            <div key={p.id} className="rounded-lg border border-slate-200 p-3">
+              <div className="mb-2 flex flex-wrap items-center gap-2">
+                <input
+                  value={p.label}
+                  onChange={(e) => updatePkg(p.id, { label: e.target.value })}
+                  placeholder="Όνομα πακέτου"
+                  className="min-w-[10rem] flex-1 rounded-md border border-slate-300 px-3 py-1.5 text-sm font-medium"
+                />
+                <select
+                  value={p.signer}
+                  onChange={(e) => updatePkg(p.id, { signer: e.target.value })}
+                  className="rounded-md border border-slate-300 px-2 py-1.5 text-sm"
+                >
+                  {Object.entries(SIGNER_LABELS).map(([k, label]) => (
+                    <option key={k} value={k}>
+                      {label}
+                    </option>
+                  ))}
+                </select>
+                <button
+                  onClick={() => removePackage(p.id)}
+                  title="Διαγραφή πακέτου"
+                  className="rounded-md border border-red-200 p-1.5 text-red-600 hover:bg-red-50"
+                >
+                  <Trash2 size={14} />
+                </button>
+              </div>
+              <p className="mb-1 text-xs font-medium text-slate-500">Πρότυπα ({p.docs.length})</p>
+              {templates.length === 0 ? (
+                <p className="text-xs text-slate-400">Δεν υπάρχουν πρότυπα.</p>
+              ) : (
+                <div className="grid grid-cols-1 gap-1 sm:grid-cols-2">
+                  {templates.map((t) => (
+                    <label key={t.file} className="flex cursor-pointer items-center gap-2 text-sm text-slate-600">
+                      <input type="checkbox" checked={p.docs.includes(t.file)} onChange={() => toggleDoc(p.id, t.file)} />
+                      <span>{t.label}</span>
+                    </label>
+                  ))}
+                </div>
+              )}
+              {/* Πρότυπα του πακέτου που δεν υπάρχουν πια στη λίστα προτύπων */}
+              {p.docs.filter((f) => !templates.some((t) => t.file === f)).map((f) => (
+                <label key={f} className="mt-1 flex cursor-pointer items-center gap-2 text-sm text-amber-600">
+                  <input type="checkbox" checked onChange={() => toggleDoc(p.id, f)} />
+                  <span className="line-through">{f.replace(/\.(docx|pptx)$/i, '')}</span>
+                  <span className="text-xs">(λείπει)</span>
+                </label>
+              ))}
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
+  )
+}
+
 function ResetSection({ bump }) {
   const [show, setShow] = useState(false)
   const [done, setDone] = useState(false)
@@ -863,6 +993,137 @@ function EmailImportSection({ emailCheck, onEmailConfigChange }) {
   )
 }
 
+// Κανόνες e-mail → Ημερολόγιο: μηνύματα από συγκεκριμένο αποστολέα (± θέμα) μπαίνουν αυτόματα
+// ως σημειώσεις ημερολογίου (τίτλος = θέμα, σώμα = κείμενο, ημερομηνία = άφιξη e-mail).
+function CalendarRulesSection() {
+  const [rules, setRules] = useState([])
+  const [busy, setBusy] = useState(false)
+  const [msg, setMsg] = useState(null) // { text, type }
+
+  useEffect(() => {
+    api.mailGetCalendarRules().then((r) => setRules(Array.isArray(r) ? r : []))
+  }, [])
+
+  async function persist(next) {
+    setRules(next)
+    await api.mailSetCalendarRules(next)
+  }
+
+  const updateRule = (id, patch) => persist(rules.map((r) => (r.id === id ? { ...r, ...patch } : r)))
+
+  function addRule() {
+    const id = 'rule-' + Date.now().toString(36)
+    persist([...rules, { id, name: '', senderMatch: '', subjectMatch: '', enabled: true }])
+  }
+
+  function removeRule(id) {
+    if (!confirm('Διαγραφή αυτού του κανόνα;')) return
+    persist(rules.filter((r) => r.id !== id))
+  }
+
+  async function runNow() {
+    setBusy(true)
+    setMsg(null)
+    const res = await api.mailRunCalendarRules()
+    setBusy(false)
+    if (!res || res.error) return setMsg({ text: (res && res.error) || 'Αποτυχία ελέγχου.', type: 'error' })
+    if (res.configured === false) return setMsg({ text: 'Δεν έχουν οριστεί στοιχεία e-mail στις Ρυθμίσεις.', type: 'error' })
+    setMsg({ text: res.added > 0 ? `Προστέθηκαν ${res.added} σημειώσεις.` : 'Καμία νέα σημείωση.', type: 'ok' })
+  }
+
+  const inputCls = 'w-full rounded-md border border-slate-300 px-3 py-2 text-sm'
+
+  return (
+    <div className="rounded-lg border border-slate-200 bg-white p-4">
+      <h3 className="mb-1 flex items-center gap-2 font-semibold text-slate-700">
+        <CalendarPlus size={18} /> Κανόνες e-mail → Ημερολόγιο
+      </h3>
+      <p className="mb-3 text-xs text-slate-400">
+        Μηνύματα από τον αποστολέα (και προαιρετικά με θέμα που περιέχει κείμενο) εισάγονται{' '}
+        <strong>αυτόματα</strong> ως σημειώσεις ημερολογίου: τίτλος = θέμα, σώμα = κείμενο, ημερομηνία =
+        άφιξη e-mail. Ο έλεγχος γίνεται μαζί με τον αυτόματο έλεγχο λίστας (ίδια συχνότητα).
+      </p>
+
+      <div className="mb-3 flex flex-wrap items-center gap-3">
+        <button
+          onClick={addRule}
+          className="inline-flex items-center gap-1.5 rounded-md bg-blue-600 px-3 py-2 text-sm font-medium text-white hover:bg-blue-700"
+        >
+          <Plus size={16} /> Νέος κανόνας
+        </button>
+        <button
+          onClick={runNow}
+          disabled={busy}
+          className="inline-flex items-center gap-1.5 rounded-md border border-slate-300 px-3 py-2 text-sm text-slate-600 hover:bg-slate-50 disabled:opacity-40"
+        >
+          <RefreshCw size={16} className={busy ? 'animate-spin' : ''} /> Έλεγχος τώρα
+        </button>
+        {msg && <span className={`text-sm ${msg.type === 'error' ? 'text-red-600' : 'text-green-600'}`}>{msg.text}</span>}
+      </div>
+
+      {rules.length === 0 ? (
+        <p className="rounded-md bg-slate-50 p-3 text-sm text-slate-400">Δεν υπάρχουν κανόνες.</p>
+      ) : (
+        <div className="space-y-3">
+          {rules.map((r) => (
+            <div key={r.id} className="rounded-lg border border-slate-200 p-3">
+              <div className="mb-2 flex items-center justify-between gap-2">
+                <label className="flex cursor-pointer items-center gap-2 text-sm text-slate-600">
+                  <input
+                    type="checkbox"
+                    checked={r.enabled !== false}
+                    onChange={(e) => updateRule(r.id, { enabled: e.target.checked })}
+                  />
+                  Ενεργός
+                </label>
+                <button
+                  onClick={() => removeRule(r.id)}
+                  title="Διαγραφή κανόνα"
+                  className="rounded-md border border-red-200 p-1.5 text-red-600 hover:bg-red-50"
+                >
+                  <Trash2 size={14} />
+                </button>
+              </div>
+              <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
+                <label className="block">
+                  <span className="mb-1 block text-xs font-medium text-slate-500">Όνομα (προαιρετικό)</span>
+                  <input
+                    value={r.name || ''}
+                    onChange={(e) => updateRule(r.id, { name: e.target.value })}
+                    placeholder="π.χ. Ανακοινώσεις ΥΠΑΙΘ"
+                    className={inputCls}
+                  />
+                </label>
+                <label className="block">
+                  <span className="mb-1 block text-xs font-medium text-slate-500">Αποστολέας περιέχει *</span>
+                  <input
+                    value={r.senderMatch || ''}
+                    onChange={(e) => updateRule(r.id, { senderMatch: e.target.value })}
+                    placeholder="π.χ. info-refuge-education@minedu.gov.gr"
+                    className={inputCls}
+                  />
+                </label>
+                <label className="block sm:col-span-2">
+                  <span className="mb-1 block text-xs font-medium text-slate-500">Θέμα περιέχει (προαιρετικό)</span>
+                  <input
+                    value={r.subjectMatch || ''}
+                    onChange={(e) => updateRule(r.id, { subjectMatch: e.target.value })}
+                    placeholder="Άφησέ το κενό για όλα τα μηνύματα του αποστολέα"
+                    className={inputCls}
+                  />
+                </label>
+              </div>
+              {!String(r.senderMatch || '').trim() && (
+                <p className="mt-1 text-xs text-amber-600">Όρισε αποστολέα για να ενεργοποιηθεί ο κανόνας.</p>
+              )}
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
+  )
+}
+
 // Ενότητα ενημερώσεων (πειραματικό): τρέχουσα έκδοση, διακόπτης αυτόματου ελέγχου, «Έλεγχος τώρα».
 function UpdateSection() {
   const [auto, setAuto] = useState(true)
@@ -987,11 +1248,15 @@ export default function Settings({ version, bump, emailCheck, onEmailConfigChang
 
       <EmailImportSection emailCheck={emailCheck} onEmailConfigChange={onEmailConfigChange} />
 
+      <CalendarRulesSection />
+
       <BackupSection />
 
       <UpdateSection />
 
       <TemplatesSection />
+
+      <PackagesSection />
 
       <ResetSection bump={bump} />
     </div>

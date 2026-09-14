@@ -242,4 +242,98 @@ async function downloadByUid(config, mailbox, uid) {
   }
 }
 
-module.exports = { testConnection, checkLatest, downloadByUid, norm, contains, DEFAULT_SEARCH_DAYS }
+// Καθαρισμός HTML σε απλό κείμενο (πρόχειρο) — fallback όταν λείπει το text/plain μέρος.
+function htmlToText(html) {
+  return String(html || '')
+    .replace(/<style[\s\S]*?<\/style>/gi, '')
+    .replace(/<script[\s\S]*?<\/script>/gi, '')
+    .replace(/<br\s*\/?>/gi, '\n')
+    .replace(/<\/(p|div|li|tr|h[1-6])>/gi, '\n')
+    .replace(/<[^>]+>/g, '')
+    .replace(/&nbsp;/gi, ' ')
+    .replace(/&amp;/gi, '&')
+    .replace(/&lt;/gi, '<')
+    .replace(/&gt;/gi, '>')
+    .replace(/[ \t]+\n/g, '\n')
+    .replace(/\n{3,}/g, '\n\n')
+    .trim()
+}
+
+// Έλεγχος αν ένα μήνυμα (envelope) ταιριάζει σε κανόνα «e-mail → Ημερολόγιο».
+// Κανόνας: { senderMatch (υποχρεωτικό), subjectMatch? }. Ταιριάζει αν ο αποστολέας περιέχει
+// το senderMatch ΚΑΙ (αν οριστεί) το θέμα περιέχει το subjectMatch.
+function ruleMatches(env, rule) {
+  if (!rule || !rule.senderMatch || !String(rule.senderMatch).trim()) return false
+  if (!contains(fromString(env), rule.senderMatch)) return false
+  if (rule.subjectMatch && String(rule.subjectMatch).trim() && !contains((env && env.subject) || '', rule.subjectMatch))
+    return false
+  return true
+}
+
+// Σάρωση όλων των φακέλων για μηνύματα που ταιριάζουν στους κανόνες (τελευταίες searchDays ημέρες).
+// Παραλείπει μηνύματα με Message-ID που υπάρχει ήδη στο knownIds (Set) — φθηνό, χωρίς λήψη σώματος.
+// Για τα ταιριάσματα κατεβάζει το σώμα (text/plain ή fallback από HTML).
+// Επιστρέφει { ok, matches: [{ messageId, date, subject, body, ruleId }] } ή { error }.
+// ΜΟΝΟ ανάγνωση.
+async function fetchCalendarMatches(config, rules, knownIds) {
+  const cfg = withDefaults(config)
+  const activeRules = (rules || []).filter((r) => r && r.enabled !== false && r.senderMatch)
+  if (!activeRules.length) return { ok: true, matches: [] }
+  const known = knownIds instanceof Set ? knownIds : new Set(knownIds || [])
+  const client = makeClient(cfg)
+  const matches = []
+  try {
+    await client.connect()
+    const boxes = await client.list()
+    for (const box of boxes) {
+      if (box.flags && (box.flags.has ? box.flags.has('\\Noselect') : false)) continue
+      let lock = null
+      try {
+        lock = await client.getMailboxLock(box.path)
+        const uids = await client.search({ since: daysAgo(cfg.searchDays) }, { uid: true })
+        if (!uids || !uids.length) continue
+        // 1ο πέρασμα (φθηνό): βρες υποψήφια uids που ταιριάζουν σε κανόνα & δεν είναι γνωστά.
+        const candidates = [] // { uid, messageId, date, subject, ruleId }
+        for await (const msg of client.fetch({ uid: uids }, { uid: true, envelope: true, internalDate: true })) {
+          const env = msg.envelope || {}
+          const messageId = (env.messageId || '').trim()
+          if (messageId && known.has(messageId)) continue
+          const rule = activeRules.find((r) => ruleMatches(env, r))
+          if (!rule) continue
+          candidates.push({
+            uid: msg.uid,
+            messageId,
+            date: msg.internalDate || env.date || null,
+            subject: env.subject || '(χωρίς θέμα)',
+            ruleId: rule.id,
+          })
+        }
+        // 2ο πέρασμα: κατέβασε σώμα μόνο για τα υποψήφια.
+        for (const c of candidates) {
+          let body = ''
+          try {
+            const full = await client.fetchOne(c.uid, { source: true }, { uid: true })
+            if (full && full.source) {
+              const parsed = await simpleParser(full.source)
+              body = (parsed.text && parsed.text.trim()) || htmlToText(parsed.html) || ''
+            }
+          } catch {
+            // αγνόησε — σημείωση χωρίς σώμα
+          }
+          matches.push({ messageId: c.messageId, date: c.date, subject: c.subject, body, ruleId: c.ruleId })
+        }
+      } catch {
+        // αγνόησε φακέλους που δεν ανοίγουν
+      } finally {
+        if (lock) try { lock.release() } catch {}
+      }
+    }
+    return { ok: true, matches }
+  } catch (err) {
+    return { error: friendly(err) }
+  } finally {
+    try { await client.logout() } catch { try { client.close() } catch {} }
+  }
+}
+
+module.exports = { testConnection, checkLatest, downloadByUid, fetchCalendarMatches, norm, contains, DEFAULT_SEARCH_DAYS }

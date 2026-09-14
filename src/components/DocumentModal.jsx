@@ -2,7 +2,13 @@ import { useEffect, useState } from 'react'
 import Modal from './Modal'
 import api from '../api'
 import SigneePicker, { signeeValid } from './SigneePicker'
+import SignaturePad from './SignaturePad'
 import { FileText, Loader2, ArrowLeft } from 'lucide-react'
+
+// Αρχική επιλογή υπογράφοντα: ενήλικας μαθητής → ο ίδιος, αλλιώς Πατέρας.
+function defaultChoice(s) {
+  return s && s.enilikas === 'Ναι' ? { type: 'self' } : { type: 'father' }
+}
 
 export default function DocumentModal({ student, onClose }) {
   const [templates, setTemplates] = useState([])
@@ -10,7 +16,8 @@ export default function DocumentModal({ student, onClose }) {
   const [busy, setBusy] = useState(null)
   const [message, setMessage] = useState(null)
   const [detailsFor, setDetailsFor] = useState(null) // template object που χρειάζεται στοιχεία (υπογράφων / ελεύθερα πεδία)
-  const [choice, setChoice] = useState({ type: 'father' })
+  const [choice, setChoice] = useState(() => defaultChoice(student))
+  const [signature, setSignature] = useState(null) // { dataUrl, wPx, hPx } | null
   const [extras, setExtras] = useState({}) // { [token]: value } για «άγνωστα» tokens (π.χ. σχολεία)
 
   useEffect(() => {
@@ -44,10 +51,10 @@ export default function DocumentModal({ student, onClose }) {
     return [...ask, ...unknown]
   }
 
-  async function doGenerate(file, signee, extrasVal) {
+  async function doGenerate(file, signee, extrasVal, signatureVal) {
     setBusy(file)
     setMessage(null)
-    const res = await api.generateDocument(student.id, file, signee, extrasVal)
+    const res = await api.generateDocument(student.id, file, signee, extrasVal, signatureVal)
     setBusy(null)
     setDetailsFor(null)
     if (res && res.error) setMessage({ type: 'error', text: res.error })
@@ -56,13 +63,14 @@ export default function DocumentModal({ student, onClose }) {
 
   function onTemplateClick(t) {
     const fields = fieldsOf(t)
-    if (t.needsSignee || fields.length) {
-      setChoice({ type: 'father' })
+    if (t.needsSignee || t.needsSign || fields.length) {
+      setChoice(defaultChoice(student))
+      setSignature(null)
       // Seed με data-key = raw token· τα ask-πεδία παίρνουν την θυμημένη τιμή, τα υπόλοιπα κενό.
       setExtras(Object.fromEntries(fields.map((f) => [f.token, f.value])))
       setDetailsFor(t)
     } else {
-      doGenerate(t.file, null, null)
+      doGenerate(t.file, null, null, null)
     }
   }
 
@@ -84,7 +92,7 @@ export default function DocumentModal({ student, onClose }) {
               <ArrowLeft size={14} /> Πίσω
             </button>
             <button
-              onClick={() => doGenerate(detailsFor.file, detailsFor.needsSignee ? choice : null, extras)}
+              onClick={() => doGenerate(detailsFor.file, detailsFor.needsSignee ? choice : null, extras, signature)}
               disabled={!valid || busy}
               className="rounded-md bg-blue-600 px-3 py-1.5 text-sm font-medium text-white hover:bg-blue-700 disabled:opacity-40"
             >
@@ -123,7 +131,21 @@ export default function DocumentModal({ student, onClose }) {
           </div>
         )}
 
-        {detailsFor.needsSignee && <SigneePicker value={choice} onChange={setChoice} allowOther hints={hints} />}
+        {detailsFor.needsSignee && (
+          <SigneePicker
+            value={choice}
+            onChange={setChoice}
+            options={['father', 'mother', 'sep', 'self', 'other']}
+            hints={hints}
+          />
+        )}
+
+        {detailsFor.needsSign && (
+          <div className="mt-4">
+            <SignaturePad onChange={setSignature} />
+            <p className="mt-1 text-xs text-slate-400">Προαιρετικό — μπορείς να εκδώσεις και χωρίς υπογραφή.</p>
+          </div>
+        )}
       </Modal>
     )
   }
@@ -158,9 +180,13 @@ export default function DocumentModal({ student, onClose }) {
                   <FileText size={16} className="text-blue-600" />
                 )}
                 <span>{t.label}</span>
-                {(t.needsSignee || extraCount > 0) && (
+                {(t.needsSignee || t.needsSign || extraCount > 0) && (
                   <span className="ml-auto text-xs text-slate-400">
-                    {[t.needsSignee ? 'υπογράφων' : null, extraCount > 0 ? 'στοιχεία' : null]
+                    {[
+                      t.needsSignee ? 'υπογράφων' : null,
+                      t.needsSign ? 'υπογραφή' : null,
+                      extraCount > 0 ? 'στοιχεία' : null,
+                    ]
                       .filter(Boolean)
                       .join(' + ')}
                   </span>

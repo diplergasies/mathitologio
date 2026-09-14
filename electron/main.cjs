@@ -971,6 +971,72 @@ ipcMain.handle('mail:import', async (_e, id = {}) => {
   }
 })
 
+// ---- Κανόνες e-mail → Ημερολόγιο -------------------------------------------
+// Ο χρήστης ορίζει κανόνες { id, name, senderMatch, subjectMatch?, enabled }. Τα μηνύματα που
+// ταιριάζουν εισάγονται ΑΥΤΟΜΑΤΑ ως σημειώσεις ημερολογίου (τίτλος = θέμα, σώμα = κείμενο,
+// ημερομηνία = άφιξη e-mail). Dedup ανά Message-ID (στήλη calendar_notes.source_message_id).
+
+function getCalendarRules() {
+  const s = db.getAllSettings()
+  if (!s.mail_calendar_rules) return []
+  try {
+    const arr = JSON.parse(s.mail_calendar_rules)
+    return Array.isArray(arr) ? arr : []
+  } catch {
+    return []
+  }
+}
+
+// Μετατροπή ημερομηνίας σε τοπικό 'YYYY-MM-DD'.
+function toLocalYmd(d) {
+  const dt = d ? new Date(d) : new Date()
+  const t = new Date(dt.getTime() - dt.getTimezoneOffset() * 60000)
+  return t.toISOString().slice(0, 10)
+}
+
+// Εκτέλεση των κανόνων: σάρωση γραμματοκιβωτίου & εισαγωγή νέων σημειώσεων. Επιστρέφει { ok, added }.
+async function runCalendarRules() {
+  const cfg = getMailConfig()
+  if (!cfg.username || !cfg.password) return { ok: true, configured: false, added: 0 }
+  const rules = getCalendarRules().filter((r) => r && r.enabled !== false && r.senderMatch)
+  if (!rules.length) return { ok: true, configured: true, added: 0 }
+  const knownRows = db.query(
+    "SELECT source_message_id FROM calendar_notes WHERE source_message_id IS NOT NULL AND source_message_id <> ''"
+  )
+  const known = new Set(knownRows.map((r) => String(r.source_message_id)))
+  const r = await mail.fetchCalendarMatches(cfg, rules, known)
+  if (r.error) return { error: r.error }
+  let added = 0
+  const now = nowIso()
+  for (const m of r.matches || []) {
+    // Ασφάλεια: αν λείπει Message-ID δεν μπορούμε να κάνουμε dedup — παραλείπουμε (αποφυγή διπλών).
+    if (!m.messageId || known.has(m.messageId)) continue
+    db.run(
+      `INSERT INTO calendar_notes (date, title, note, created_at, updated_at, source_message_id)
+       VALUES ($d, $t, $n, $c, $c, $m)`,
+      {
+        $d: toLocalYmd(m.date),
+        $t: String(m.subject || '(χωρίς θέμα)').trim(),
+        $n: m.body ? String(m.body) : null,
+        $c: now,
+        $m: m.messageId,
+      }
+    )
+    known.add(m.messageId)
+    added++
+  }
+  return { ok: true, configured: true, added }
+}
+
+ipcMain.handle('mail:getCalendarRules', () => getCalendarRules())
+
+ipcMain.handle('mail:setCalendarRules', (_e, rules = []) => {
+  db.setSettings({ mail_calendar_rules: JSON.stringify(Array.isArray(rules) ? rules : []) })
+  return { ok: true }
+})
+
+ipcMain.handle('mail:runCalendarRules', async () => runCalendarRules())
+
 // ---- Μαζικές ενέργειες ----------------------------------------------------
 
 ipcMain.handle('students:bulkDelete', (_e, payload = []) => {
@@ -1308,6 +1374,8 @@ ipcMain.handle('documents:list', () => {
           file: f,
           label: f.replace(/\.(pptx|docx)$/i, ''),
           needsSignee: tokens.includes('signee') || tokens.includes('signee.prop'),
+          // Το πρότυπο έχει γραμμή υπογραφής {{signee.sign}} → μπορεί να δεχθεί χειρόγραφη υπογραφή.
+          needsSign: tokens.includes('signee.sign'),
           builtin,
           tokens,
           // «Άγνωστα» ελεύθερα πεδία ανά έγγραφο (χωρίς prefix ?, πάντα κενά — π.χ. σχολείο προορισμού).
@@ -1386,7 +1454,7 @@ ipcMain.handle('templates:openFolder', async () => {
   }
 })
 
-ipcMain.handle('documents:generate', async (_e, { id, templateFile, signee, extras }) => {
+ipcMain.handle('documents:generate', async (_e, { id, templateFile, signee, extras, signature }) => {
   const rows = db.query(
     `SELECT s.*, sc.name AS school_name, sc.type AS school_type
        FROM students s LEFT JOIN schools sc ON sc.id = s.school_id
@@ -1401,11 +1469,21 @@ ipcMain.handle('documents:generate', async (_e, { id, templateFile, signee, extr
 
   const cfg = db.getAllSettings()
   const data = buildDocData(s, cfg)
+  let images
   if (signee) {
     const sg = computeSignee(s, cfg, signee)
     data['signee'] = sg.signee
     data['signee.prop'] = sg.prop
-    data['signee.sign'] = '' // γραμμή υπογραφής κενή στην ατομική έκδοση· το όνομα τυπώνεται χωριστά ({{signee}})
+    data['signee.sign'] = '' // γραμμή υπογραφής: κενή (fallback) ή εικόνα (παρακάτω)
+    // Παρένθεση επιτρόπου (ΣΕΠ + ασυνόδευτος) — αλλιώς κενό, ώστε να μη τυπώνεται αυτούσιο το token.
+    data['signee.note'] = computeSigneeNote(cfg, signee, s)
+    // Χειρόγραφη υπογραφή: εικόνα στη γραμμή υπογραφής {{signee.sign}} (το όνομα τυπώνεται από κάτω).
+    const sig = signature && decodeDataUrl(signature.dataUrl)
+    if (sig) {
+      images = { 'signee.sign': { pngBuffer: sig.buffer, wPx: signature.wPx, hPx: signature.hPx } }
+    }
+  } else {
+    data['signee.note'] = ''
   }
   // Ελεύθερα πεδία που συμπλήρωσε ο χρήστης (π.χ. σχολείο προέλευσης/προορισμού σε
   // αίτηση μετεγγραφής) — αντιστοιχούν σε «άγνωστα» tokens του προτύπου.
@@ -1425,6 +1503,7 @@ ipcMain.handle('documents:generate', async (_e, { id, templateFile, signee, extr
     pdfPath = documents.generate({
       templatePath,
       data,
+      images,
       resourcesPath: isDev ? null : process.resourcesPath,
       isDev,
       userDataPath: app.getPath('userData'),

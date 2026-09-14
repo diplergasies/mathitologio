@@ -163,6 +163,22 @@ export default function App() {
     setEmailPrompt(null)
   }
 
+  // Κανόνες e-mail → Ημερολόγιο: εισάγει αυτόματα σημειώσεις από μηνύματα που ταιριάζουν.
+  async function runCalendarRules({ manual } = {}) {
+    const res = await api.mailRunCalendarRules()
+    if (!res) return
+    if (res.error) {
+      if (manual) showToast(res.error, 'error')
+      return
+    }
+    if (res.added > 0) {
+      showToast(`Προστέθηκαν ${res.added} σημειώσεις ημερολογίου από e-mail.`)
+      bump() // ανανέωση ανοιχτού Ημερολογίου
+    } else if (manual) {
+      showToast('Καμία νέα σημείωση από τους κανόνες e-mail.')
+    }
+  }
+
   // Poller: έλεγχος στην εκκίνηση + περιοδικά, βάσει ρυθμίσεων. Επαναρυθμίζεται όταν αλλάξουν
   // οι ρυθμίσεις e-mail (emailTick).
   useEffect(() => {
@@ -176,8 +192,13 @@ export default function App() {
       const configured = cfg.username && cfg.hasPassword
       if (!configured || cfg.autoFreq === 'off') return
       checkEmail({ manual: false })
+      runCalendarRules({ manual: false })
       const ms = FREQ_MS[cfg.autoFreq]
-      if (ms) emailTimerRef.current = setInterval(() => checkEmail({ manual: false }), ms)
+      if (ms)
+        emailTimerRef.current = setInterval(() => {
+          checkEmail({ manual: false })
+          runCalendarRules({ manual: false })
+        }, ms)
     })
     return () => {
       cancelled = true

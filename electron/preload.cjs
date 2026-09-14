@@ -37,8 +37,8 @@ contextBridge.exposeInMainWorld('api', {
   addTemplate: () => ipcRenderer.invoke('templates:add'),
   deleteTemplate: (file) => ipcRenderer.invoke('templates:delete', file),
   openTemplatesFolder: () => ipcRenderer.invoke('templates:openFolder'),
-  generateDocument: (id, templateFile, signee, extras) =>
-    ipcRenderer.invoke('documents:generate', { id, templateFile, signee, extras }),
+  generateDocument: (id, templateFile, signee, extras, signature) =>
+    ipcRenderer.invoke('documents:generate', { id, templateFile, signee, extras, signature }),
   generatePackage: (payload) => ipcRenderer.invoke('documents:generatePackage', payload),
   choosePackageFolder: () => ipcRenderer.invoke('package:chooseFolder'),
 
@@ -84,6 +84,10 @@ contextBridge.exposeInMainWorld('api', {
   mailClearCredentials: () => ipcRenderer.invoke('mail:clearCredentials'),
   mailCheck: () => ipcRenderer.invoke('mail:check'),
   mailImportMessage: (id) => ipcRenderer.invoke('mail:import', id),
+  // Κανόνες e-mail → Ημερολόγιο.
+  mailGetCalendarRules: () => ipcRenderer.invoke('mail:getCalendarRules'),
+  mailSetCalendarRules: (rules) => ipcRenderer.invoke('mail:setCalendarRules', rules),
+  mailRunCalendarRules: () => ipcRenderer.invoke('mail:runCalendarRules'),
 
   // Αυτόματες ενημερώσεις (πειραματικό).
   updateCheck: () => ipcRenderer.invoke('update:check'),

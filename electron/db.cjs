@@ -107,6 +107,9 @@ async function init(userDataDir) {
   // dedup ώστε δύο ομώνυμες λίστες της ίδιας ημέρας (ίδιο όνομα PDF) να μη μπερδεύονται.
   ensureColumn('batches', 'email_date', 'TEXT')
   ensureColumn('batches', 'email_message_id', 'TEXT')
+  // Message-ID e-mail που δημιούργησε αυτόματη σημείωση ημερολογίου (κανόνες e-mail→Ημερολόγιο):
+  // κλειδί dedup ώστε το ίδιο μήνυμα να μη μπαίνει δεύτερη φορά.
+  ensureColumn('calendar_notes', 'source_message_id', 'TEXT')
   // Backfill: παλαιότεροι εγγεγραμμένοι χωρίς enrolled_at -> updated_at/created_at (καλύτερη εκτίμηση).
   db.run(
     `UPDATE students SET enrolled_at = COALESCE(updated_at, created_at)
