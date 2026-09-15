@@ -9,6 +9,7 @@ import Observatory from './tabs/Observatory'
 import Calendar from './tabs/Calendar'
 import HelpModal from './components/HelpModal'
 import DepartureDetectionModal from './components/DepartureDetectionModal'
+import RoomChangesModal from './components/RoomChangesModal'
 import EmailPromptModal from './components/EmailPromptModal'
 import UpdateBanner from './components/UpdateBanner'
 import { Upload, FileText, Download, Database, PlaneLanding, Users, Trash2, Settings as SettingsIcon, BarChart3, ClipboardList, CalendarDays, BookOpen, HelpCircle } from 'lucide-react'
@@ -34,6 +35,7 @@ export default function App() {
   const [toast, setToast] = useState(null)
   const [showHelp, setShowHelp] = useState(false)
   const [departures, setDepartures] = useState(null)
+  const [roomChanges, setRoomChanges] = useState(null)
   const [emailPrompt, setEmailPrompt] = useState(null) // { uid, filename, date, subject }
   const [emailBusy, setEmailBusy] = useState(false)
   const [emailTick, setEmailTick] = useState(0) // αλλαγές ρυθμίσεων e-mail → επαναρύθμιση poller
@@ -101,11 +103,15 @@ export default function App() {
     let msg = `Εισαγωγή: ${res.imported} μαθητές σχολικής ηλικίας προστέθηκαν στις Αφίξεις.`
     if (res.excluded) msg += ` ${res.excluded} εξαιρέθηκαν (εκτός σχολικής ηλικίας).`
     if (res.duplicates) msg += ` ${res.duplicates} παραλείφθηκαν ως διπλά (ίδιο ΔΙΚΑ).`
+    if (res.roomChanges && res.roomChanges.length)
+      msg += ` ${res.roomChanges.length} άλλαξαν δωμάτιο (Μονάδα) — ενημερώθηκαν αυτόματα.`
     if (res.missingFields && res.missingFields.length)
       msg += ` Προσοχή: δεν εντοπίστηκαν στήλες: ${res.missingFields.join(', ')}.`
     showToast(msg, res.missingFields && res.missingFields.length ? 'warn' : 'ok')
     setTab('arrivals')
     bump()
+    // Αλλαγές δωματίου (Μονάδα): ταυτοποιήθηκαν βάσει ΔΙΚΑ & ενημερώθηκαν ήδη — ενημερωτικό pop-up.
+    if (res.roomChanges && res.roomChanges.length) setRoomChanges(res.roomChanges)
     // Ανίχνευση αποχωρήσεων: μαθητές που υπάρχουν ήδη αλλά λείπουν από τη νέα λίστα.
     if (res.departed && res.departed.length) setDepartures(res.departed)
   }
@@ -334,6 +340,8 @@ export default function App() {
           onClose={dismissEmailPrompt}
         />
       )}
+
+      {roomChanges && <RoomChangesModal changes={roomChanges} onClose={() => setRoomChanges(null)} />}
 
       {departures && (
         <DepartureDetectionModal

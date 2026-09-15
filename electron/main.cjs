@@ -303,18 +303,25 @@ function insertRecords(filePath, parsed, meta = {}) {
 
   // Έλεγχος διπλών ΔΙΚΑ: σε σχέση με ενεργούς μαθητές (άφιξη/εγγεγραμμένοι) ΚΑΙ μέσα στο ίδιο
   // αρχείο. Οι διαγραμμένοι ΔΕΝ μετράνε (επιτρέπεται επανεμφάνιση). Κενά ΔΙΚΑ δεν θεωρούνται διπλά.
-  const existing = new Set(
-    db
-      .query("SELECT dika FROM students WHERE dika != '' AND status IN ('arrival','enrolled')")
-      .map((r) => String(r.dika).trim())
-  )
+  // Κρατάμε id + τρέχουσα Μονάδα/όνομα ανά ΔΙΚΑ, ώστε στα «διπλά» να μπορούμε να ελέγξουμε αν ο
+  // διαμένων άλλαξε δωμάτιο (Μονάδα) στη νέα λίστα και να το ενημερώσουμε αυτόματα.
+  const existingByDika = new Map()
+  for (const s of db.query(
+    "SELECT id, dika, monada, onoma, eponymo FROM students WHERE dika != '' AND status IN ('arrival','enrolled')"
+  ))
+    existingByDika.set(String(s.dika).trim(), s)
   const seenInFile = new Set()
+
+  // Κλειδί σύγκρισης Μονάδας: αγνοεί διαφορές κενών/πεζών-κεφαλαίων, ώστε να μη θεωρηθεί «αλλαγή»
+  // μια απλή τυπογραφική διαφορά.
+  const roomKey = (v) => String(v == null ? '' : v).replace(/\s+/g, ' ').trim().toLowerCase()
 
   const afixis = todayDisplay()
   let imported = 0
   let excluded = 0
   let skipped = 0
   let duplicates = 0
+  const roomChanges = [] // { id, dika, onoma, eponymo, from, to }
 
   for (const r of records) {
     // Παράλειψη κενών/άκυρων γραμμών (χωρίς όνομα, επώνυμο και ΔΙΚΑ).
@@ -322,9 +329,33 @@ function insertRecords(filePath, parsed, meta = {}) {
       skipped++
       continue
     }
-    // Παράλειψη διπλών ΔΙΚΑ.
+    // Διπλά ΔΙΚΑ (υπάρχων ενεργός μαθητής): δεν εισάγουμε ξανά. Ελέγχουμε όμως αν η νέα λίστα
+    // δίνει ΔΙΑΦΟΡΕΤΙΚΗ (μη κενή) Μονάδα — αν ναι, ο διαμένων άλλαξε δωμάτιο, οπότε ενημερώνουμε
+    // αυτόματα το υπάρχον έγγραφο.
     const dika = String(r.dika || '').trim()
-    if (dika && (existing.has(dika) || seenInFile.has(dika))) {
+    if (dika && existingByDika.has(dika)) {
+      duplicates++
+      const prev = existingByDika.get(dika)
+      const newMon = String(r.monada || '').trim()
+      if (newMon && roomKey(newMon) !== roomKey(prev.monada)) {
+        db.run('UPDATE students SET monada=$m, updated_at=$now WHERE id=$id', {
+          $m: newMon,
+          $now: nowIso(),
+          $id: prev.id,
+        })
+        roomChanges.push({
+          id: prev.id,
+          dika,
+          onoma: prev.onoma || '',
+          eponymo: prev.eponymo || '',
+          from: prev.monada || '',
+          to: newMon,
+        })
+        prev.monada = newMon // αποφυγή διπλού entry αν ο ίδιος ΔΙΚΑ εμφανιστεί ξανά στο αρχείο
+      }
+      continue
+    }
+    if (dika && seenInFile.has(dika)) {
       duplicates++
       continue
     }
@@ -376,7 +407,7 @@ function insertRecords(filePath, parsed, meta = {}) {
     .filter((s) => !fileDikas.has(norm(s.dika)))
 
   db.markAdults() // αυτόματη σήμανση ενηλίκων στους νεοεισαχθέντες
-  return { canceled: false, imported, excluded, duplicates, totalRows, missingFields, batchId, departed }
+  return { canceled: false, imported, excluded, duplicates, totalRows, missingFields, batchId, departed, roomChanges }
 }
 
 ipcMain.handle('import:xlsx', async () => {
