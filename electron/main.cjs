@@ -312,9 +312,10 @@ function insertRecords(filePath, parsed, meta = {}) {
     existingByDika.set(String(s.dika).trim(), s)
   const seenInFile = new Set()
 
-  // Κλειδί σύγκρισης Μονάδας: αγνοεί διαφορές κενών/πεζών-κεφαλαίων, ώστε να μη θεωρηθεί «αλλαγή»
-  // μια απλή τυπογραφική διαφορά.
-  const roomKey = (v) => String(v == null ? '' : v).replace(/\s+/g, ' ').trim().toLowerCase()
+  // Κλειδί σύγκρισης Μονάδας: αγνοεί ΟΛΑ τα κενά (ο κωδικός Μονάδας σπάει με κενά κατά το parsing
+  // PDF — importer.cjs) και πεζά/κεφαλαία, ώστε ίδιο δωμάτιο να μη θεωρηθεί «αλλαγή». Ίδια λογική
+  // με τον normalizer αποχωρήσεων (`norm`, πιο κάτω).
+  const roomKey = (v) => String(v == null ? '' : v).replace(/\s+/g, '').toLowerCase()
 
   const afixis = todayDisplay()
   let imported = 0
