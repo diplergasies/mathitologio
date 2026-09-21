@@ -3,6 +3,7 @@ import api from '../api'
 import Schools from './Schools'
 import PromotionModal from '../components/PromotionModal'
 import ResetDataModal from '../components/ResetDataModal'
+import { useConfirm } from '../components/ConfirmProvider'
 import { UserCog, Save, School, CalendarRange, GraduationCap, DatabaseBackup, FolderOpen, Play, FileText, FilePlus2, Trash2, AlertTriangle, Mail, RefreshCw, KeyRound, Search, HelpCircle, FolderArchive, Plus, CalendarPlus } from 'lucide-react'
 import { loadPackages, defaultPackages, SIGNER_LABELS } from '../lib/registrationPackages'
 
@@ -423,6 +424,7 @@ function RememberedFieldsSection({ templates }) {
 }
 
 function TemplatesSection() {
+  const confirm = useConfirm()
   const [templates, setTemplates] = useState([])
   const [msg, setMsg] = useState(null) // { text, type }
   const [busy, setBusy] = useState(false)
@@ -459,7 +461,8 @@ function TemplatesSection() {
   }
 
   async function remove(t) {
-    if (!confirm(`Διαγραφή του προτύπου «${t.label}»;`)) return
+    if (!(await confirm({ message: `Διαγραφή του προτύπου «${t.label}»;`, confirmLabel: 'Διαγραφή' })))
+      return
     const res = await api.deleteTemplate(t.file)
     if (res && res.error) return setMsg({ text: res.error, type: 'error' })
     setMsg({ text: 'Το πρότυπο διαγράφηκε.', type: 'ok' })
@@ -602,6 +605,7 @@ function TemplatesSection() {
 
 // Διαχείριση πακέτων εγγραφής: δημιουργία/επεξεργασία/διαγραφή, προσθαφαίρεση προτύπων.
 function PackagesSection() {
+  const confirm = useConfirm()
   const [packages, setPackages] = useState([])
   const [templates, setTemplates] = useState([]) // [{ file, label, ... }]
   const [msg, setMsg] = useState(null) // { text, type }
@@ -632,13 +636,20 @@ function PackagesSection() {
     persist([...packages, { id, label: 'Νέο πακέτο', signer: 'minor', docs: [] }])
   }
 
-  function removePackage(id) {
-    if (!confirm('Διαγραφή αυτού του πακέτου;')) return
+  async function removePackage(id) {
+    if (!(await confirm({ message: 'Διαγραφή αυτού του πακέτου;', confirmLabel: 'Διαγραφή' }))) return
     persist(packages.filter((p) => p.id !== id))
   }
 
-  function resetDefaults() {
-    if (!confirm('Επαναφορά των προεπιλεγμένων πακέτων (Ανήλικος / Ενήλικας); Τα δικά σου πακέτα θα χαθούν.')) return
+  async function resetDefaults() {
+    if (
+      !(await confirm({
+        message: 'Επαναφορά των προεπιλεγμένων πακέτων (Ανήλικος / Ενήλικας); Τα δικά σου πακέτα θα χαθούν.',
+        confirmLabel: 'Επαναφορά',
+        danger: false,
+      }))
+    )
+      return
     persist(defaultPackages())
   }
 
@@ -780,6 +791,7 @@ const MAIL_FREQ = [
 
 // Πειραματικό: αυτόματη εισαγωγή λίστας πληθυσμού (ΣΕΠ) από το γραμματοκιβώτιο sch.gr.
 function EmailImportSection({ emailCheck, onEmailConfigChange }) {
+  const confirm = useConfirm()
   const [host, setHost] = useState('mail.sch.gr')
   const [port, setPort] = useState('993')
   const [username, setUsername] = useState('')
@@ -868,7 +880,13 @@ function EmailImportSection({ emailCheck, onEmailConfigChange }) {
   }
 
   async function clearCreds() {
-    if (!confirm('Σβήσιμο αποθηκευμένων συνθηματικών και απενεργοποίηση αυτόματης εισαγωγής;')) return
+    if (
+      !(await confirm({
+        message: 'Σβήσιμο αποθηκευμένων συνθηματικών και απενεργοποίηση αυτόματης εισαγωγής;',
+        confirmLabel: 'Σβήσιμο',
+      }))
+    )
+      return
     setBusy('clear')
     setMsg(null)
     await api.mailClearCredentials()
@@ -996,6 +1014,7 @@ function EmailImportSection({ emailCheck, onEmailConfigChange }) {
 // Κανόνες e-mail → Ημερολόγιο: μηνύματα από συγκεκριμένο αποστολέα (± θέμα) μπαίνουν αυτόματα
 // ως σημειώσεις ημερολογίου (τίτλος = θέμα, σώμα = κείμενο, ημερομηνία = άφιξη e-mail).
 function CalendarRulesSection() {
+  const confirm = useConfirm()
   const [rules, setRules] = useState([])
   const [busy, setBusy] = useState(false)
   const [msg, setMsg] = useState(null) // { text, type }
@@ -1016,8 +1035,8 @@ function CalendarRulesSection() {
     persist([...rules, { id, name: '', senderMatch: '', subjectMatch: '', enabled: true }])
   }
 
-  function removeRule(id) {
-    if (!confirm('Διαγραφή αυτού του κανόνα;')) return
+  async function removeRule(id) {
+    if (!(await confirm({ message: 'Διαγραφή αυτού του κανόνα;', confirmLabel: 'Διαγραφή' }))) return
     persist(rules.filter((r) => r.id !== id))
   }
 

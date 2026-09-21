@@ -1,10 +1,12 @@
 import { useEffect, useState } from 'react'
 import api from '../api'
+import { useConfirm } from '../components/ConfirmProvider'
 import { Plus, Trash2, School, Pencil, Check, X } from 'lucide-react'
 
 const TYPES = ['Νηπιαγωγείο', 'Δημοτικό', 'Γυμνάσιο', 'Λύκειο', 'ΕΠΑΛ']
 
 export default function Schools({ version, bump }) {
+  const confirm = useConfirm()
   const [schools, setSchools] = useState([])
   const [name, setName] = useState('')
   const [type, setType] = useState('Δημοτικό')
@@ -55,7 +57,8 @@ export default function Schools({ version, bump }) {
 
   async function remove(s) {
     setError(null)
-    if (!confirm(`Διαγραφή του σχολείου «${s.name}»;`)) return
+    if (!(await confirm({ message: `Διαγραφή του σχολείου «${s.name}»;`, confirmLabel: 'Διαγραφή' })))
+      return
     const res = await api.deleteSchool(s.id)
     if (res && res.error) return setError(res.error)
     bump()

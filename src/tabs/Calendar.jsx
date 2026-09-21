@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from 'react'
 import api from '../api'
 import Modal from '../components/Modal'
+import { useConfirm, useNotify } from '../components/ConfirmProvider'
 import {
   MONTHS, DOW_SHORT, DOW_FULL, toKey, keyToDMY, monthGrid, weekDays,
   addDays, addMonths, sameDay,
@@ -53,6 +54,8 @@ function daySummary(events) {
 }
 
 export default function Calendar({ version, bump }) {
+  const confirm = useConfirm()
+  const notify = useNotify()
   const [view, setView] = useState('month')
   const [cursor, setCursor] = useState(() => new Date())
   const [events, setEvents] = useState([])
@@ -102,7 +105,7 @@ export default function Calendar({ version, bump }) {
   }
 
   async function deleteNote(id) {
-    if (!confirm('Διαγραφή σημείωσης;')) return
+    if (!(await confirm({ message: 'Διαγραφή σημείωσης;', confirmLabel: 'Διαγραφή' }))) return
     await api.deleteCalendarNote(id)
     setNoteEdit(null)
     reload()
@@ -124,9 +127,9 @@ export default function Calendar({ version, bump }) {
       const syStart = info && info.schoolYearStart ? Number(info.schoolYearStart) : new Date().getFullYear()
       const syLabel = (info && info.schoolYearLabel) || `${syStart}-${syStart + 1}`
       const res = await exportCalendarDocx({ syStart, syLabel })
-      if (res && res.error) alert(res.error)
+      if (res && res.error) notify(res.error)
     } catch (err) {
-      alert(`Αποτυχία εξαγωγής: ${err && err.message ? err.message : err}`)
+      notify(`Αποτυχία εξαγωγής: ${err && err.message ? err.message : err}`)
     } finally {
       setExporting(false)
     }

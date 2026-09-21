@@ -3,6 +3,7 @@ import api from '../api'
 import StudentTable from '../components/StudentTable'
 import FyloCell from '../components/FyloCell'
 import { useSelection } from '../useSelection'
+import { useConfirm } from '../components/ConfirmProvider'
 import { Undo2, Users, Trash2, Pencil, Check, X } from 'lucide-react'
 import { isoToDMY } from '../calendarUtils'
 
@@ -15,6 +16,7 @@ function fmtDeleted(iso) {
 }
 
 export default function Deletions({ version, bump, showToast }) {
+  const confirm = useConfirm()
   const [students, setStudents] = useState([])
   const [editId, setEditId] = useState(null)
   const [editReason, setEditReason] = useState('')
@@ -142,13 +144,25 @@ export default function Deletions({ version, bump, showToast }) {
   }
 
   async function purge(s) {
-    if (!confirm(`ΟΡΙΣΤΙΚΗ διαγραφή του μαθητή ${s.eponymo} ${s.onoma};\nΔεν αναιρείται.`)) return
+    if (
+      !(await confirm({
+        message: `ΟΡΙΣΤΙΚΗ διαγραφή του μαθητή ${s.eponymo} ${s.onoma};\nΔεν αναιρείται.`,
+        confirmLabel: 'Οριστική διαγραφή',
+      }))
+    )
+      return
     await api.purgeStudent(s.id)
     bump()
   }
 
   async function bulkPurge() {
-    if (!confirm(`ΟΡΙΣΤΙΚΗ διαγραφή ${sel.ids.length} μαθητών;\nΔεν αναιρείται.`)) return
+    if (
+      !(await confirm({
+        message: `ΟΡΙΣΤΙΚΗ διαγραφή ${sel.ids.length} μαθητών;\nΔεν αναιρείται.`,
+        confirmLabel: 'Οριστική διαγραφή',
+      }))
+    )
+      return
     await api.bulkPurge(sel.ids)
     sel.clear()
     bump()

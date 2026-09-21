@@ -12,6 +12,7 @@ import DepartureDetectionModal from './components/DepartureDetectionModal'
 import RoomChangesModal from './components/RoomChangesModal'
 import EmailPromptModal from './components/EmailPromptModal'
 import UpdateBanner from './components/UpdateBanner'
+import { useConfirm } from './components/ConfirmProvider'
 import { Upload, FileText, Download, Database, PlaneLanding, Users, Trash2, Settings as SettingsIcon, BarChart3, ClipboardList, CalendarDays, BookOpen, HelpCircle } from 'lucide-react'
 
 // Ορατή στον χρήστη έκδοση = μόνο major.minor (π.χ. «1.6»). Οι σιωπηλές ενημερώσεις αυξάνουν
@@ -29,6 +30,7 @@ const TABS = [
 ]
 
 export default function App() {
+  const confirm = useConfirm()
   const [tab, setTab] = useState('students') // αρχική καρτέλα· μετά από εισαγωγή λίστας → Αφίξεις (reportImport)
   const [version, setVersion] = useState(0)
   const [info, setInfo] = useState(null)
@@ -230,7 +232,13 @@ export default function App() {
   }
 
   async function doImportBackup() {
-    if (!confirm('Η επαναφορά θα αντικαταστήσει ΟΛΑ τα τρέχοντα δεδομένα. Συνέχεια;')) return
+    if (
+      !(await confirm({
+        message: 'Η επαναφορά θα αντικαταστήσει ΟΛΑ τα τρέχοντα δεδομένα. Συνέχεια;',
+        confirmLabel: 'Επαναφορά',
+      }))
+    )
+      return
     const res = await api.importBackup()
     if (res && res.ok) {
       showToast('Τα δεδομένα επαναφέρθηκαν.')

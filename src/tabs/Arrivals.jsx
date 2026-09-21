@@ -10,10 +10,12 @@ import EnrollDocsPrompt from '../components/EnrollDocsPrompt'
 import BulkDocumentModal from '../components/BulkDocumentModal'
 import LastImportBadge from '../components/LastImportBadge'
 import { useSelection } from '../useSelection'
+import { useConfirm } from '../components/ConfirmProvider'
 import { birthSortValue, proposedSortValue } from '../sort'
 import { GraduationCap, Trash2, Users, Hash, UserPlus } from 'lucide-react'
 
 export default function Arrivals({ version, bump, showToast }) {
+  const confirm = useConfirm()
   const [students, setStudents] = useState([])
   const [bulkEnroll, setBulkEnroll] = useState(false)
   const [dikaDelete, setDikaDelete] = useState(false)
@@ -110,13 +112,15 @@ export default function Arrivals({ version, bump, showToast }) {
   }
 
   async function del(s) {
-    if (!confirm(`Διαγραφή του μαθητή ${s.eponymo} ${s.onoma};`)) return
+    if (!(await confirm({ message: `Διαγραφή του μαθητή ${s.eponymo} ${s.onoma};`, confirmLabel: 'Διαγραφή' })))
+      return
     await api.deleteStudent(s.id)
     bump()
   }
 
   async function bulkDelete() {
-    if (!confirm(`Μαζική διαγραφή ${sel.ids.length} μαθητών;`)) return
+    if (!(await confirm({ message: `Μαζική διαγραφή ${sel.ids.length} μαθητών;`, confirmLabel: 'Διαγραφή' })))
+      return
     await api.bulkDelete(sel.ids)
     sel.clear()
     bump()
