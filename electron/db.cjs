@@ -155,10 +155,41 @@ function ensureColumn(table, col, decl) {
   }
 }
 
+// Αποθήκευση όλης της βάσης στο δίσκο. Με sql.js κάθε αλλαγή ξαναγράφει ολόκληρο το
+// αρχείο, οπότε είναι ευάλωτο σε στιγμιαία κλειδώματα (OneDrive/antivirus) και σε
+// read-only φακέλους. Γράφουμε ατομικά (tmp → rename) με λίγες επαναπροσπάθειες, και
+// ΔΕΝ καταπίνουμε το σφάλμα: πετάμε καθαρό Error ώστε να φανεί στον χρήστη.
 function save() {
-  if (!db || !dbPath) return
+  if (!db || !dbPath) {
+    throw new Error('Η βάση δεδομένων δεν έχει αρχικοποιηθεί.')
+  }
   const data = Buffer.from(db.export())
-  fs.writeFileSync(dbPath, data)
+  const tmp = dbPath + '.tmp'
+  const LOCK_CODES = new Set(['EBUSY', 'EPERM', 'EACCES', 'ETXTBSY'])
+  let lastErr = null
+  for (let attempt = 0; attempt < 5; attempt++) {
+    try {
+      fs.writeFileSync(tmp, data)
+      fs.renameSync(tmp, dbPath)
+      return
+    } catch (err) {
+      lastErr = err
+      try { if (fs.existsSync(tmp)) fs.unlinkSync(tmp) } catch {}
+      // Παροδικό κλείδωμα → σύντομη σύγχρονη αναμονή (χωρίς σπατάλη CPU) και νέα προσπάθεια.
+      if (LOCK_CODES.has(err.code) && attempt < 4) {
+        try { Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 120) } catch {}
+        continue
+      }
+      break
+    }
+  }
+  const code = lastErr && lastErr.code ? ` (${lastErr.code})` : ''
+  const msg = lastErr && lastErr.message ? lastErr.message : String(lastErr)
+  throw new Error(
+    `Αποτυχία αποθήκευσης της βάσης${code}. Πιθανές αιτίες: το αρχείο είναι μόνο για ανάγνωση, ` +
+    `συγχρονισμός OneDrive ή antivirus κλειδώνει τον φάκελο, ή έλλειψη δικαιωμάτων. ` +
+    `Λεπτομέρειες: ${msg}`
+  )
 }
 
 // SELECT -> array of plain objects.

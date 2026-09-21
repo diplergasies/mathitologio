@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react'
 import api from '../api'
 import StudentTable from '../components/StudentTable'
 import FyloCell from '../components/FyloCell'
+import GradeCell from '../components/GradeCell'
 import BulkEnrollModal from '../components/BulkEnrollModal'
 import BulkDeleteByDikaModal from '../components/BulkDeleteByDikaModal'
 import ManualArrivalModal from '../components/ManualArrivalModal'
@@ -12,7 +13,7 @@ import { useSelection } from '../useSelection'
 import { birthSortValue, proposedSortValue } from '../sort'
 import { GraduationCap, Trash2, Users, Hash, UserPlus } from 'lucide-react'
 
-export default function Arrivals({ version, bump }) {
+export default function Arrivals({ version, bump, showToast }) {
   const [students, setStudents] = useState([])
   const [bulkEnroll, setBulkEnroll] = useState(false)
   const [dikaDelete, setDikaDelete] = useState(false)
@@ -31,9 +32,27 @@ export default function Arrivals({ version, bump }) {
     api.getSettings().then((s) => setPromptOn(!s || s.enrollDocsPrompt !== '0'))
   }, [])
 
-  async function toggleEpitropos(s) {
-    await api.updateStudent(s.id, { epitropos: s.epitropos === 'Ναι' ? 'Όχι' : 'Ναι' })
+  const notifyError = (m) => showToast && showToast(m, 'error')
+
+  async function update(id, fields) {
+    try {
+      const res = await api.updateStudent(id, fields)
+      if (res && res.error) {
+        notifyError(res.error)
+        bump()
+        return false
+      }
+    } catch (e) {
+      notifyError(`Αποτυχία αποθήκευσης: ${e && e.message ? e.message : e}`)
+      bump()
+      return false
+    }
     bump()
+    return true
+  }
+
+  async function toggleEpitropos(s) {
+    await update(s.id, { epitropos: s.epitropos === 'Ναι' ? 'Όχι' : 'Ναι' })
   }
 
   const columns = [
@@ -42,7 +61,7 @@ export default function Arrivals({ version, bump }) {
     { key: 'patronymo', label: 'Πατρώνυμο', editable: true },
     { key: 'monada', label: 'Μονάδα', editable: true },
     { key: 'dika', label: 'ΔΙΚΑ', editable: true },
-    { key: 'fylo', label: 'Φύλο', render: (s) => <FyloCell student={s} onChanged={bump} /> },
+    { key: 'fylo', label: 'Φύλο', render: (s) => <FyloCell student={s} onChanged={bump} onError={notifyError} /> },
     { key: 'imerominia_gennisis', label: 'Ημ. γέννησης', sortable: true, sortAccessor: birthSortValue, editable: true },
     { key: 'ithageneia', label: 'Ιθαγένεια', editable: true },
     { key: 'glossa', label: 'Γλώσσα', editable: true },
@@ -62,16 +81,30 @@ export default function Arrivals({ version, bump }) {
       ),
     },
     {
+      // Επιλογή τάξης εγγραφής: dropdown όπως στους Μαθητές. Δείχνει την προτεινόμενη
+      // τάξη ως προεπιλογή· η επιλογή γράφεται στο current_grade και περνά στην εγγραφή.
       key: 'proposed',
       label: 'Προτεινόμενη τάξη',
       sortable: true,
       sortAccessor: proposedSortValue,
-      render: (s) => `${s.computed_type} · ${s.computed_grade}`,
+      render: (s) => (
+        <GradeCell
+          student={s}
+          fallbackGrade={s.computed_grade}
+          onChanged={bump}
+          onError={notifyError}
+        />
+      ),
     },
   ]
 
   async function enrollOne(s) {
-    await api.enroll(s.id)
+    const res = await api.enroll(s.id)
+    if (res && res.error) {
+      notifyError(res.error)
+      bump()
+      return
+    }
     bump()
     if (promptOn) setEnrolledForDocs([s])
   }
@@ -90,8 +123,7 @@ export default function Arrivals({ version, bump }) {
   }
 
   async function saveCell(id, key, value) {
-    await api.updateStudent(id, { [key]: value })
-    bump()
+    await update(id, { [key]: value })
   }
 
   async function applyColor(ids, color) {

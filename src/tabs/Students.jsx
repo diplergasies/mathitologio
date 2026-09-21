@@ -16,7 +16,7 @@ import { birthSortValue } from '../sort'
 import { isoToDMY } from '../calendarUtils'
 import { FileText, Trash2, Users, Hash, FileSpreadsheet, FolderArchive } from 'lucide-react'
 
-export default function Students({ version, bump }) {
+export default function Students({ version, bump, showToast }) {
   const [students, setStudents] = useState([])
   const [docFor, setDocFor] = useState(null)
   const [pkgFor, setPkgFor] = useState(null)
@@ -32,29 +32,46 @@ export default function Students({ version, bump }) {
   }
   useEffect(load, [version])
 
-  async function toggleEpitropos(s) {
-    await api.updateStudent(s.id, { epitropos: s.epitropos === 'Ναι' ? 'Όχι' : 'Ναι' })
+  const notifyError = (m) => showToast && showToast(m, 'error')
+
+  // Κοινή ενημέρωση μαθητή: εμφανίζει μήνυμα σε αποτυχία αποθήκευσης (π.χ. κλειδωμένο
+  // αρχείο DB) αντί να αποτυγχάνει σιωπηλά, και ανανεώνει ώστε το κελί να μη δείχνει
+  // ψευδώς την αλλαγή.
+  async function update(id, fields) {
+    try {
+      const res = await api.updateStudent(id, fields)
+      if (res && res.error) {
+        notifyError(res.error)
+        bump()
+        return false
+      }
+    } catch (e) {
+      notifyError(`Αποτυχία αποθήκευσης: ${e && e.message ? e.message : e}`)
+      bump()
+      return false
+    }
     bump()
+    return true
+  }
+
+  async function toggleEpitropos(s) {
+    await update(s.id, { epitropos: s.epitropos === 'Ναι' ? 'Όχι' : 'Ναι' })
   }
 
   async function toggleAsyn(s) {
-    await api.updateStudent(s.id, { asynodeftos: s.asynodeftos === 'Ναι' ? 'Όχι' : 'Ναι' })
-    bump()
+    await update(s.id, { asynodeftos: s.asynodeftos === 'Ναι' ? 'Όχι' : 'Ναι' })
   }
 
   async function toggleEidiki(s) {
-    await api.updateStudent(s.id, { eidiki_agogi: s.eidiki_agogi === 'Ναι' ? 'Όχι' : 'Ναι' })
-    bump()
+    await update(s.id, { eidiki_agogi: s.eidiki_agogi === 'Ναι' ? 'Όχι' : 'Ναι' })
   }
 
   async function toggleEnilikas(s) {
-    await api.updateStudent(s.id, { enilikas: s.enilikas === 'Ναι' ? 'Όχι' : 'Ναι' })
-    bump()
+    await update(s.id, { enilikas: s.enilikas === 'Ναι' ? 'Όχι' : 'Ναι' })
   }
 
   async function saveCell(id, key, value) {
-    await api.updateStudent(id, { [key]: value })
-    bump()
+    await update(id, { [key]: value })
   }
 
   async function applyColor(ids, color) {
@@ -69,7 +86,7 @@ export default function Students({ version, bump }) {
     { key: 'patronymo', label: 'Πατρώνυμο', editable: true },
     { key: 'monada', label: 'Μονάδα', editable: true },
     { key: 'dika', label: 'ΔΙΚΑ', editable: true },
-    { key: 'fylo', label: 'Φύλο', render: (s) => <FyloCell student={s} onChanged={bump} /> },
+    { key: 'fylo', label: 'Φύλο', render: (s) => <FyloCell student={s} onChanged={bump} onError={notifyError} /> },
     { key: 'ithageneia', label: 'Ιθαγένεια', editable: true },
     { key: 'imerominia_gennisis', label: 'Ημ. γέννησης', sortable: true, sortAccessor: birthSortValue, editable: true },
     {
@@ -77,13 +94,13 @@ export default function Students({ version, bump }) {
       label: 'Σχολείο',
       sortable: true,
       sortAccessor: (s) => s.school_name || '',
-      render: (s) => <SchoolCell student={s} onChanged={bump} />,
+      render: (s) => <SchoolCell student={s} onChanged={bump} onError={notifyError} />,
     },
     { key: 'school_type', label: 'Τύπος', render: (s) => s.school_type || '—' },
     {
       key: 'current_grade',
       label: 'Τάξη',
-      render: (s) => <GradeCell student={s} onChanged={bump} />,
+      render: (s) => <GradeCell student={s} onChanged={bump} onError={notifyError} />,
     },
     { key: 'imerominia_afixis', label: 'Ημ. άφιξης', editable: true },
     {

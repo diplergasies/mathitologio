@@ -14,11 +14,30 @@ function fmtDeleted(iso) {
   return `${p(d.getDate())}/${p(d.getMonth() + 1)}/${d.getFullYear()} ${p(d.getHours())}:${p(d.getMinutes())}`
 }
 
-export default function Deletions({ version, bump }) {
+export default function Deletions({ version, bump, showToast }) {
   const [students, setStudents] = useState([])
   const [editId, setEditId] = useState(null)
   const [editReason, setEditReason] = useState('')
   const sel = useSelection()
+
+  const notifyError = (m) => showToast && showToast(m, 'error')
+
+  async function update(id, fields) {
+    try {
+      const res = await api.updateStudent(id, fields)
+      if (res && res.error) {
+        notifyError(res.error)
+        bump()
+        return false
+      }
+    } catch (e) {
+      notifyError(`Αποτυχία αποθήκευσης: ${e && e.message ? e.message : e}`)
+      bump()
+      return false
+    }
+    bump()
+    return true
+  }
 
   function startEditReason(s) {
     setEditId(s.id)
@@ -26,14 +45,12 @@ export default function Deletions({ version, bump }) {
   }
 
   async function saveReason() {
-    await api.updateStudent(editId, { deletion_reason: editReason.trim() })
+    await update(editId, { deletion_reason: editReason.trim() })
     setEditId(null)
-    bump()
   }
 
   async function saveCell(id, key, value) {
-    await api.updateStudent(id, { [key]: value })
-    bump()
+    await update(id, { [key]: value })
   }
 
   async function applyColor(ids, color) {
@@ -48,7 +65,7 @@ export default function Deletions({ version, bump }) {
     { key: 'patronymo', label: 'Πατρώνυμο', editable: true },
     { key: 'monada', label: 'Μονάδα', editable: true },
     { key: 'dika', label: 'ΔΙΚΑ', editable: true },
-    { key: 'fylo', label: 'Φύλο', render: (s) => <FyloCell student={s} onChanged={bump} /> },
+    { key: 'fylo', label: 'Φύλο', render: (s) => <FyloCell student={s} onChanged={bump} onError={notifyError} /> },
     { key: 'ithageneia', label: 'Ιθαγένεια', editable: true },
     { key: 'imerominia_gennisis', label: 'Ημ. γέννησης', editable: true },
     { key: 'school_name', label: 'Σχολείο' },

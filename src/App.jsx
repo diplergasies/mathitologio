@@ -324,6 +324,7 @@ export default function App() {
           <Active
             version={version}
             bump={bump}
+            showToast={showToast}
             emailCheck={() => checkEmail({ manual: true })}
             onEmailConfigChange={() => setEmailTick((t) => t + 1)}
           />

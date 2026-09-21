@@ -618,7 +618,11 @@ ipcMain.handle('students:enroll', (_e, { id, schoolId }) => {
   if (!rows.length) return { error: 'Δεν βρέθηκε ο μαθητής' }
   const s = rows[0]
   const cls = grades.classify(s.birth_year, getSchoolYearStart(), getGradeRanges())
-  const grade = cls ? cls.grade : s.computed_grade
+  // Αν ο χρήστης έχει ήδη επιλέξει τάξη (π.χ. από την καρτέλα Αφίξεις), σέβεται την επιλογή·
+  // αλλιώς αυτόματη κατάταξη βάσει ηλικίας (ή η προτεινόμενη τάξη).
+  const grade = (s.current_grade && String(s.current_grade).trim())
+    ? s.current_grade
+    : (cls ? cls.grade : s.computed_grade)
 
   // Αν δεν δόθηκε σχολείο, auto-ανάθεση ΜΟΝΟ αν υπάρχει ακριβώς ένα κατάλληλο· αλλιώς κενό
   // (ο χρήστης θα επιλέξει αργότερα από την καρτέλα Μαθητές).
@@ -631,23 +635,31 @@ ipcMain.handle('students:enroll', (_e, { id, schoolId }) => {
     if (matches.length === 1) assigned = matches[0].id
   }
 
-  db.run(
-    `UPDATE students
-        SET status='enrolled', prev_status=status, school_id=$sid,
-            current_grade=$g, enrolled_at=$now, updated_at=$now
-      WHERE id=$id`,
-    { $sid: assigned, $g: grade, $now: nowIso(), $id: id }
-  )
+  try {
+    db.run(
+      `UPDATE students
+          SET status='enrolled', prev_status=status, school_id=$sid,
+              current_grade=$g, enrolled_at=$now, updated_at=$now
+        WHERE id=$id`,
+      { $sid: assigned, $g: grade, $now: nowIso(), $id: id }
+    )
+  } catch (err) {
+    return { ok: false, error: err.message }
+  }
   return { ok: true, schoolAssigned: assigned != null }
 })
 
 // Ανάθεση/αλλαγή σχολείου σε εγγεγραμμένο μαθητή (από την καρτέλα Μαθητές).
 ipcMain.handle('students:setSchool', (_e, { id, schoolId }) => {
-  db.run('UPDATE students SET school_id=$sid, updated_at=$now WHERE id=$id', {
-    $sid: schoolId != null ? schoolId : null,
-    $now: nowIso(),
-    $id: id,
-  })
+  try {
+    db.run('UPDATE students SET school_id=$sid, updated_at=$now WHERE id=$id', {
+      $sid: schoolId != null ? schoolId : null,
+      $now: nowIso(),
+      $id: id,
+    })
+  } catch (err) {
+    return { ok: false, error: err.message }
+  }
   return { ok: true }
 })
 
@@ -738,7 +750,11 @@ ipcMain.handle('students:update', (_e, { id, fields }) => {
   }
 
   if (!sets.length) return { ok: true }
-  db.run(`UPDATE students SET ${sets.join(', ')}, updated_at=$now WHERE id=$id`, params)
+  try {
+    db.run(`UPDATE students SET ${sets.join(', ')}, updated_at=$now WHERE id=$id`, params)
+  } catch (err) {
+    return { ok: false, error: err.message }
+  }
   return { ok: true }
 })
 
@@ -1326,13 +1342,17 @@ ipcMain.handle('schools:list', () =>
 ipcMain.handle('schools:add', (_e, { name, type, dyep, ty }) => {
   if (!name || !type) return { error: 'Συμπλήρωσε όνομα και τύπο' }
   if (!grades.SCHOOL_TYPES.includes(type)) return { error: 'Μη έγκυρος τύπος σχολείου' }
-  const id = db.run('INSERT INTO schools (name, type, dyep, ty) VALUES ($n, $t, $d, $ty)', {
-    $n: name,
-    $t: type,
-    $d: dyep ? 1 : 0,
-    $ty: ty ? 1 : 0,
-  })
-  return { ok: true, id }
+  try {
+    const id = db.run('INSERT INTO schools (name, type, dyep, ty) VALUES ($n, $t, $d, $ty)', {
+      $n: name,
+      $t: type,
+      $d: dyep ? 1 : 0,
+      $ty: ty ? 1 : 0,
+    })
+    return { ok: true, id }
+  } catch (err) {
+    return { ok: false, error: err.message }
+  }
 })
 
 ipcMain.handle('schools:delete', (_e, id) => {
@@ -1343,20 +1363,28 @@ ipcMain.handle('schools:delete', (_e, id) => {
   if (used > 0) {
     return { error: `Δεν διαγράφεται: ${used} εγγεγραμμένοι μαθητές σε αυτό το σχολείο.` }
   }
-  db.run('DELETE FROM schools WHERE id=$id', { $id: id })
+  try {
+    db.run('DELETE FROM schools WHERE id=$id', { $id: id })
+  } catch (err) {
+    return { ok: false, error: err.message }
+  }
   return { ok: true }
 })
 
 ipcMain.handle('schools:update', (_e, { id, name, type, dyep, ty }) => {
   if (!name || !type) return { error: 'Συμπλήρωσε όνομα και τύπο' }
   if (!grades.SCHOOL_TYPES.includes(type)) return { error: 'Μη έγκυρος τύπος σχολείου' }
-  db.run('UPDATE schools SET name=$n, type=$t, dyep=$d, ty=$ty WHERE id=$id', {
-    $n: name,
-    $t: type,
-    $d: dyep ? 1 : 0,
-    $ty: ty ? 1 : 0,
-    $id: id,
-  })
+  try {
+    db.run('UPDATE schools SET name=$n, type=$t, dyep=$d, ty=$ty WHERE id=$id', {
+      $n: name,
+      $t: type,
+      $d: dyep ? 1 : 0,
+      $ty: ty ? 1 : 0,
+      $id: id,
+    })
+  } catch (err) {
+    return { ok: false, error: err.message }
+  }
   return { ok: true }
 })
 
