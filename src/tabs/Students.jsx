@@ -7,6 +7,7 @@ import BulkDocumentModal from '../components/BulkDocumentModal'
 import BulkDeleteByDikaModal from '../components/BulkDeleteByDikaModal'
 import DeleteReasonModal from '../components/DeleteReasonModal'
 import ExportStudentsModal from '../components/ExportStudentsModal'
+import StudentNoteModal from '../components/StudentNoteModal'
 import SchoolCell from '../components/SchoolCell'
 import GradeCell from '../components/GradeCell'
 import FyloCell from '../components/FyloCell'
@@ -25,6 +26,7 @@ export default function Students({ version, bump, showToast }) {
   const [delFor, setDelFor] = useState(null) // μαθητής προς διαγραφή (single)
   const [bulkDel, setBulkDel] = useState(false) // μαζική διαγραφή επιλεγμένων
   const [exportOpen, setExportOpen] = useState(false)
+  const [noteFor, setNoteFor] = useState(null)
   const sel = useSelection()
 
   function load() {
@@ -223,6 +225,7 @@ export default function Students({ version, bump, showToast }) {
         onToggleAll={sel.toggleAll}
         onCellSave={saveCell}
         onSetColor={applyColor}
+        onOpenNote={setNoteFor}
         renderActions={(s) => (
           <>
             <button
@@ -249,6 +252,14 @@ export default function Students({ version, bump, showToast }) {
           </>
         )}
       />
+
+      {noteFor && (
+        <StudentNoteModal
+          student={noteFor}
+          onClose={() => setNoteFor(null)}
+          onSave={async (text) => { await update(noteFor.id, { note: text }); setNoteFor(null) }}
+        />
+      )}
 
       {pkgFor && <RegistrationPackageModal student={pkgFor} onClose={() => setPkgFor(null)} />}
       {docFor && <DocumentModal student={docFor} onClose={() => setDocFor(null)} />}

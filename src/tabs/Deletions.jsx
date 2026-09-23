@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react'
 import api from '../api'
 import StudentTable from '../components/StudentTable'
+import StudentNoteModal from '../components/StudentNoteModal'
 import FyloCell from '../components/FyloCell'
 import { useSelection } from '../useSelection'
 import { useConfirm } from '../components/ConfirmProvider'
@@ -20,6 +21,7 @@ export default function Deletions({ version, bump, showToast }) {
   const [students, setStudents] = useState([])
   const [editId, setEditId] = useState(null)
   const [editReason, setEditReason] = useState('')
+  const [noteFor, setNoteFor] = useState(null)
   const sel = useSelection()
 
   const notifyError = (m) => showToast && showToast(m, 'error')
@@ -204,6 +206,7 @@ export default function Deletions({ version, bump, showToast }) {
         onToggleAll={sel.toggleAll}
         onCellSave={saveCell}
         onSetColor={applyColor}
+        onOpenNote={setNoteFor}
         renderActions={(s) => (
           <>
             <button
@@ -223,6 +226,14 @@ export default function Deletions({ version, bump, showToast }) {
           </>
         )}
       />
+
+      {noteFor && (
+        <StudentNoteModal
+          student={noteFor}
+          onClose={() => setNoteFor(null)}
+          onSave={async (text) => { await update(noteFor.id, { note: text }); setNoteFor(null) }}
+        />
+      )}
     </div>
   )
 }

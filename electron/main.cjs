@@ -736,6 +736,12 @@ ipcMain.handle('students:update', (_e, { id, fields }) => {
     params.$dr = fields.deletion_reason || null
   }
 
+  // Ελεύθερη σημείωση μαθητή (κενή → NULL).
+  if (fields.note !== undefined) {
+    sets.push('note=$note')
+    params.$note = (fields.note && String(fields.note).trim()) || null
+  }
+
   // Ημερομηνία άφιξης: κανονικοποίηση σε 'DD/MM/YYYY' (ομοιομορφία με το σύστημα).
   if (fields.imerominia_afixis !== undefined) {
     const v = String(fields.imerominia_afixis || '').trim()
@@ -2046,18 +2052,10 @@ ipcMain.handle('stats:observatory', (_e, period) => {
 
   const levelTotals = { 'Πρωτοβάθμια': 0, 'Δευτεροβάθμια': 0, 'Άλλο': 0 }
   const schoolMap = new Map() // key -> { name, type, total }
-  const deleted = [] // όσοι εγγράφηκαν στην περίοδο αλλά έχουν πλέον διαγραφεί
   let total = 0
 
   for (const s of rows) {
     total++
-    if (s.status === 'deleted') {
-      deleted.push({
-        name: `${s.eponymo || ''} ${s.onoma || ''}`.trim(),
-        dika: s.dika || '',
-        school: s.school_id != null ? s.school_name : '',
-      })
-    }
     const category = s.school_type || s.computed_type || 'Άλλο'
     levelTotals[levelOf(category)] += 1
 
@@ -2070,6 +2068,30 @@ ipcMain.handle('stats:observatory', (_e, period) => {
       })
     }
     schoolMap.get(key).total += 1
+  }
+
+  // Διαγραφές ΜΕΣΑ στην περίοδο (βάσει deleted_at) — ΟΛΕΣ, ανεξάρτητα από το πότε έγινε η εγγραφή.
+  // Ομαδοποίηση ανά βαθμίδα & σχολείο (ίδια δομή με τις εγγραφές).
+  const delRows = db.query(
+    `SELECT s.computed_type, sc.id AS school_id, sc.name AS school_name, sc.type AS school_type
+       FROM students s LEFT JOIN schools sc ON sc.id = s.school_id
+      WHERE s.status = 'deleted' AND s.deleted_at >= $start AND s.deleted_at < $end`,
+    { $start: startIso, $end: endIso }
+  )
+  const delLevelTotals = { 'Πρωτοβάθμια': 0, 'Δευτεροβάθμια': 0, 'Άλλο': 0 }
+  const delSchoolMap = new Map()
+  for (const s of delRows) {
+    const category = s.school_type || s.computed_type || 'Άλλο'
+    delLevelTotals[levelOf(category)] += 1
+    const key = s.school_id != null ? `id:${s.school_id}` : 'none'
+    if (!delSchoolMap.has(key)) {
+      delSchoolMap.set(key, {
+        name: s.school_id != null ? s.school_name : 'Χωρίς σχολείο',
+        type: s.school_id != null ? s.school_type : '',
+        total: 0,
+      })
+    }
+    delSchoolMap.get(key).total += 1
   }
 
   // Α1.2–1.4, Α1.5, Α3.1 — ΤΡΕΧΟΥΣΑ ΕΙΚΟΝΑ: από τους ΕΝΕΡΓΟΥΣ (εγγεγραμμένους) μαθητές,
@@ -2122,6 +2144,16 @@ ipcMain.handle('stats:observatory', (_e, period) => {
     return a.name.localeCompare(b.name, 'el')
   })
 
+  const delByLevel = ['Πρωτοβάθμια', 'Δευτεροβάθμια'].map((lv) => ({ level: lv, total: delLevelTotals[lv] }))
+  const delBySchool = [...delSchoolMap.values()].sort((a, b) => {
+    if (a.type === '' && b.type !== '') return 1
+    if (b.type === '' && a.type !== '') return -1
+    const ta = TYPE_RANK[a.type] || 99
+    const tb = TYPE_RANK[b.type] || 99
+    if (ta !== tb) return ta - tb
+    return a.name.localeCompare(b.name, 'el')
+  })
+
   return {
     year,
     month,
@@ -2135,9 +2167,9 @@ ipcMain.handle('stats:observatory', (_e, period) => {
     withoutTY,
     eidiki,
     asynodeftoi,
-    deleted,
-    deletedTotal: deleted.length,
-    activeTotal: total - deleted.length,
+    delByLevel,
+    delBySchool,
+    deletedTotal: delRows.length,
     activeEnrolled: activeRows.length,
     dropoutTotal: dropRows.length,
     dropoutReasons,

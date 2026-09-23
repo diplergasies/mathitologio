@@ -1,5 +1,5 @@
 import { useMemo, useRef, useState } from 'react'
-import { ArrowDown, ArrowUp, ChevronsUpDown, Search, X, Palette } from 'lucide-react'
+import { ArrowDown, ArrowUp, ChevronsUpDown, Search, X, Palette, StickyNote } from 'lucide-react'
 import { batchColor, CODE_COLORS } from '../colors'
 import { fold, studentHaystack, matchSegments } from '../search'
 
@@ -24,6 +24,7 @@ export default function StudentTable({
   onToggleAll,
   onCellSave,
   onSetColor,
+  onOpenNote,
 }) {
   const [sort, setSort] = useState(null) // { key, dir: 'asc'|'desc' }
   const [q, setQ] = useState('')
@@ -263,6 +264,7 @@ export default function StudentTable({
                     />
                   </th>
                 )}
+                {onOpenNote && <th className="w-8 px-2 py-2" />}
                 {columns.map((c) => {
                   const active = sort && sort.key === c.key
                   const Icon = !c.sortable
@@ -316,6 +318,18 @@ export default function StudentTable({
                           onChange={() => {}}
                           onClick={(e) => handleSelectClick(s.id, e)}
                         />
+                      </td>
+                    )}
+                    {onOpenNote && (
+                      <td className="px-2 py-2">
+                        <button
+                          type="button"
+                          onClick={() => onOpenNote(s)}
+                          title={s.note ? 'Επεξεργασία σημείωσης' : 'Προσθήκη σημείωσης'}
+                          className="rounded p-1 hover:bg-slate-100"
+                        >
+                          <StickyNote size={15} className={s.note ? 'text-amber-500' : 'text-slate-300'} />
+                        </button>
                       </td>
                     )}
                     {columns.map((c) => (

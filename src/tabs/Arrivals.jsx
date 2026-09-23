@@ -8,6 +8,7 @@ import BulkDeleteByDikaModal from '../components/BulkDeleteByDikaModal'
 import ManualArrivalModal from '../components/ManualArrivalModal'
 import EnrollDocsPrompt from '../components/EnrollDocsPrompt'
 import BulkDocumentModal from '../components/BulkDocumentModal'
+import StudentNoteModal from '../components/StudentNoteModal'
 import LastImportBadge from '../components/LastImportBadge'
 import { useSelection } from '../useSelection'
 import { useConfirm } from '../components/ConfirmProvider'
@@ -23,6 +24,7 @@ export default function Arrivals({ version, bump, showToast }) {
   const [promptOn, setPromptOn] = useState(true) // ρύθμιση: ερώτηση έκδοσης εγγράφων μετά την εγγραφή
   const [enrolledForDocs, setEnrolledForDocs] = useState([]) // ερώτηση για αυτούς
   const [docStudents, setDocStudents] = useState([]) // επιλογή εγγράφων για αυτούς
+  const [noteFor, setNoteFor] = useState(null)
   const sel = useSelection()
 
   function load() {
@@ -191,6 +193,7 @@ export default function Arrivals({ version, bump, showToast }) {
         onToggleAll={sel.toggleAll}
         onCellSave={saveCell}
         onSetColor={applyColor}
+        onOpenNote={setNoteFor}
         renderActions={(s) => (
           <>
             <button
@@ -210,6 +213,14 @@ export default function Arrivals({ version, bump, showToast }) {
           </>
         )}
       />
+
+      {noteFor && (
+        <StudentNoteModal
+          student={noteFor}
+          onClose={() => setNoteFor(null)}
+          onSave={async (text) => { await update(noteFor.id, { note: text }); setNoteFor(null) }}
+        />
+      )}
 
       {bulkEnroll && (
         <BulkEnrollModal

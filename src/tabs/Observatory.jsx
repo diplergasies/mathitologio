@@ -30,24 +30,24 @@ function buildA1Text(data) {
   }
   lines.push(`Σύνολο νέων εγγραφών: ${data.total}`)
 
-  // Στο ΙΔΙΟ μπλοκ: οι διαγραφές της περιόδου — ΜΟΝΟ ανά σχολείο & σύνολο (χωρίς ονόματα/ΔΙΚΑ).
+  // Διαγραφές της περιόδου — ΟΛΕΣ (ανεξάρτητα από το πότε έγινε η εγγραφή), ανά βαθμίδα &
+  // σχολείο, με την ίδια μορφή όπως οι εγγραφές (χωρίς ονόματα/ΔΙΚΑ).
   const diagr = (n) => `${n} ${n === 1 ? 'διαγραφή' : 'διαγραφές'}`
-  const bySchoolDel = new Map()
-  for (const d of data.deleted || []) {
-    const key = d.school || 'Χωρίς σχολείο'
-    bySchoolDel.set(key, (bySchoolDel.get(key) || 0) + 1)
-  }
   lines.push('')
   lines.push('Διαγραφές περιόδου:')
-  ;[...bySchoolDel.entries()]
-    .sort((a, b) => a[0].localeCompare(b[0], 'el'))
-    .forEach(([school, n]) => lines.push(`${school}: ${diagr(n)}`))
-  lines.push(`Σύνολο: ${diagr(data.deletedTotal)}`)
+  for (const lvName of ['Πρωτοβάθμια', 'Δευτεροβάθμια']) {
+    const total = (data.delByLevel || []).find((l) => l.level === lvName)?.total ?? 0
+    lines.push(`${lvName}: ${total}`)
+    const schools = (data.delBySchool || []).filter((s) => levelOfType(s.type) === lvName)
+    lines.push(
+      `Σχολεία: ${schools.length ? schools.map((s) => `${s.name} (${s.total})`).join(', ') : '—'}`
+    )
+  }
+  lines.push(`Σύνολο: ${diagr(data.deletedTotal || 0)}`)
 
-  // Και στο τέλος το τελικό σύνολο (ενεργοί = εγγραφές − διαγραφές) + το σύνολο ΟΛΩΝ των
-  // τρέχοντων εγγεγραμμένων (παλιοί & νέοι — τρέχουσα εικόνα, ανεξάρτητη από το 15νθήμερο).
+  // Στο τέλος, το σύνολο ΟΛΩΝ των τρέχοντων εγγεγραμμένων (παλιοί & νέοι — τρέχουσα εικόνα,
+  // ανεξάρτητη από το 15νθήμερο).
   lines.push('')
-  lines.push(`Τελικό σύνολο (ενεργοί): ${data.activeTotal}`)
   lines.push(`Σύνολο εγγεγραμμένων (παλιοί & νέοι): ${data.activeEnrolled}`)
   return lines.join('\n')
 }
