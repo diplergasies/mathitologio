@@ -61,6 +61,7 @@ contextBridge.exposeInMainWorld('api', {
   listBackups: () => ipcRenderer.invoke('backup:list'),
 
   appInfo: () => ipcRenderer.invoke('app:info'),
+  getAnnouncement: () => ipcRenderer.invoke('announcement:get'),
   getReadme: () => ipcRenderer.invoke('help:readme'),
 
   monthlyStats: (period) => ipcRenderer.invoke('stats:monthly', period),

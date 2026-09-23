@@ -3,6 +3,7 @@
 const { app, BrowserWindow, ipcMain, dialog, shell, safeStorage, session } = require('electron')
 const fs = require('fs')
 const path = require('path')
+const crypto = require('crypto')
 
 const db = require('./db.cjs')
 const grades = require('./grades.cjs')
@@ -234,6 +235,35 @@ ipcMain.handle('app:info', () => {
     schoolYearStart: S,
     schoolYearLabel: grades.schoolYearLabel(S),
     firstRun,
+  }
+})
+
+// Μήνυμα προς τους χρήστες: το κείμενο ενός κοινόχρηστου Google Doc εμφανίζεται ως pop-up στην
+// έναρξη, ΜΙΑ φορά ανά διαφορετικό μήνυμα (dedup βάσει hash, αποθηκευμένο τοπικά). Best-effort:
+// σύντομο timeout, σιωπηλή αποτυχία, ΔΕΝ μπλοκάρει ποτέ την εκκίνηση (offline → απλώς null).
+const ANNOUNCEMENT_DOC_ID = '1HNQRyd4ue7R6sh7YVpJuAHNmStGO0PRM3m-9L25NFm4'
+ipcMain.handle('announcement:get', async () => {
+  try {
+    if (!ANNOUNCEMENT_DOC_ID) return null
+    // HTML export ώστε να διατηρείται η μορφοποίηση του Doc (bold/italics/χρώματα).
+    const url = `https://docs.google.com/document/d/${ANNOUNCEMENT_DOC_ID}/export?format=html&_=${Date.now()}`
+    const res = await fetch(url, { redirect: 'follow', signal: AbortSignal.timeout(6000) })
+    if (!res.ok) return null
+    const html = await res.text()
+    if (!html || html.length > 500000) return null
+    // Ορατό κείμενο (χωρίς ετικέτες) — για έλεγχο «άδειου» εγγράφου (κενό Doc → κανένα pop-up).
+    const text = html
+      .replace(/<style[\s\S]*?<\/style>/gi, ' ')
+      .replace(/<[^>]+>/g, ' ')
+      .replace(/&nbsp;|&#160;|&#xa0;|&zwnj;|&#8203;/gi, '')
+      .replace(/[\s​-‍﻿]+/g, ' ')
+      .trim()
+    if (!text) return null
+    const id = crypto.createHash('sha1').update(html).digest('hex')
+    if ((db.getAllSettings().announcement_seen_id || '') === id) return null
+    return { id, html }
+  } catch (_e) {
+    return null
   }
 })
 

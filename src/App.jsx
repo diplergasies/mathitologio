@@ -11,6 +11,7 @@ import HelpModal from './components/HelpModal'
 import DepartureDetectionModal from './components/DepartureDetectionModal'
 import RoomChangesModal from './components/RoomChangesModal'
 import EmailPromptModal from './components/EmailPromptModal'
+import AnnouncementModal from './components/AnnouncementModal'
 import UpdateBanner from './components/UpdateBanner'
 import { useConfirm } from './components/ConfirmProvider'
 import { Upload, FileText, Download, Database, PlaneLanding, Users, Trash2, Settings as SettingsIcon, BarChart3, ClipboardList, CalendarDays, BookOpen, HelpCircle } from 'lucide-react'
@@ -45,6 +46,7 @@ export default function App() {
   const handledUidRef = useRef(null) // uid που ήδη εισήχθη ή απορρίφθηκε (να μη ξαναρωτά)
   const [updateState, setUpdateState] = useState(null) // { state, importance, version, percent }
   const updateDismissedRef = useRef(null) // έκδοση που ο χρήστης απέκρυψε (να μη ξαναενοχλεί)
+  const [announcement, setAnnouncement] = useState(null) // { id, message } — μήνυμα προς χρήστες
 
   const bump = () => setVersion((v) => v + 1)
 
@@ -53,6 +55,13 @@ export default function App() {
       setInfo(i)
       // Πρώτη εκκίνηση: άνοιγμα Ρυθμίσεων ώστε ο χρήστης να ορίσει στοιχεία & σχολεία.
       if (i && i.firstRun) setTab('settings')
+    })
+  }, [])
+
+  // Μήνυμα προς τους χρήστες: best-effort έλεγχος στην έναρξη (δεν μπλοκάρει τίποτα).
+  useEffect(() => {
+    api.getAnnouncement().then((a) => {
+      if (a && a.html) setAnnouncement(a)
     })
   }, [])
 
@@ -372,6 +381,17 @@ export default function App() {
         >
           {toast.text}
         </div>
+      )}
+
+      {announcement && (
+        <AnnouncementModal
+          html={announcement.html}
+          onClose={() => {
+            // Το μήνυμα δεν ξαναεμφανίζεται σε αυτόν τον υπολογιστή (μέχρι να αλλάξει το κείμενο).
+            api.setSettings({ announcement_seen_id: announcement.id })
+            setAnnouncement(null)
+          }}
+        />
       )}
     </div>
   )
