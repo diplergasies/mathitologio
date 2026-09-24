@@ -7,7 +7,7 @@ import BulkEnrollModal from '../components/BulkEnrollModal'
 import BulkDeleteByDikaModal from '../components/BulkDeleteByDikaModal'
 import ManualArrivalModal from '../components/ManualArrivalModal'
 import EnrollDocsPrompt from '../components/EnrollDocsPrompt'
-import BulkDocumentModal from '../components/BulkDocumentModal'
+import RegistrationPackageModal from '../components/RegistrationPackageModal'
 import StudentNoteModal from '../components/StudentNoteModal'
 import LastImportBadge from '../components/LastImportBadge'
 import { useSelection } from '../useSelection'
@@ -21,9 +21,10 @@ export default function Arrivals({ version, bump, showToast }) {
   const [bulkEnroll, setBulkEnroll] = useState(false)
   const [dikaDelete, setDikaDelete] = useState(false)
   const [manual, setManual] = useState(false)
-  const [promptOn, setPromptOn] = useState(true) // ρύθμιση: ερώτηση έκδοσης εγγράφων μετά την εγγραφή
+  const [promptOn, setPromptOn] = useState(false) // ρύθμιση: ερώτηση έκδοσης πακέτου μετά την εγγραφή (default OFF)
   const [enrolledForDocs, setEnrolledForDocs] = useState([]) // ερώτηση για αυτούς
-  const [docStudents, setDocStudents] = useState([]) // επιλογή εγγράφων για αυτούς
+  const [pkgQueue, setPkgQueue] = useState([]) // ουρά μαθητών για έκδοση πακέτου εγγραφής
+  const [pkgIndex, setPkgIndex] = useState(0) // τρέχων μαθητής στην ουρά
   const [noteFor, setNoteFor] = useState(null)
   const sel = useSelection()
 
@@ -33,7 +34,7 @@ export default function Arrivals({ version, bump, showToast }) {
   useEffect(load, [version])
 
   useEffect(() => {
-    api.getSettings().then((s) => setPromptOn(!s || s.enrollDocsPrompt !== '0'))
+    api.getSettings().then((s) => setPromptOn(!!s && s.enrollDocsPrompt === '1'))
   }, [])
 
   const notifyError = (m) => showToast && showToast(m, 'error')
@@ -259,14 +260,27 @@ export default function Arrivals({ version, bump, showToast }) {
           students={enrolledForDocs}
           onClose={() => setEnrolledForDocs([])}
           onYes={() => {
-            setDocStudents(enrolledForDocs)
+            setPkgQueue(enrolledForDocs)
+            setPkgIndex(0)
             setEnrolledForDocs([])
           }}
         />
       )}
 
-      {docStudents.length > 0 && (
-        <BulkDocumentModal students={docStudents} onClose={() => setDocStudents([])} />
+      {/* Έκδοση πακέτου εγγραφής ανά μαθητή, διαδοχικά: κλείσιμο του ενός → άνοιγμα του επόμενου. */}
+      {pkgQueue[pkgIndex] && (
+        <RegistrationPackageModal
+          key={pkgQueue[pkgIndex].id}
+          student={pkgQueue[pkgIndex]}
+          onClose={() => {
+            if (pkgIndex + 1 < pkgQueue.length) {
+              setPkgIndex(pkgIndex + 1)
+            } else {
+              setPkgQueue([])
+              setPkgIndex(0)
+            }
+          }}
+        />
       )}
     </div>
   )

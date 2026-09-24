@@ -4,7 +4,7 @@ import Schools from './Schools'
 import PromotionModal from '../components/PromotionModal'
 import ResetDataModal from '../components/ResetDataModal'
 import { useConfirm } from '../components/ConfirmProvider'
-import { UserCog, Save, School, CalendarRange, GraduationCap, DatabaseBackup, FolderOpen, Play, FileText, FilePlus2, Trash2, AlertTriangle, Mail, RefreshCw, KeyRound, Search, HelpCircle, FolderArchive, Plus, CalendarPlus } from 'lucide-react'
+import { UserCog, Save, School, CalendarRange, GraduationCap, DatabaseBackup, FolderOpen, Play, FileText, FilePlus2, Trash2, AlertTriangle, Mail, RefreshCw, KeyRound, Search, HelpCircle, FolderArchive, Plus, CalendarPlus, BarChart3 } from 'lucide-react'
 import { loadPackages, defaultPackages, SIGNER_LABELS } from '../lib/registrationPackages'
 
 // Βαθμίδες με σταθερό κλειδί `type` (ίδιο με το backend) και ετικέτα εμφάνισης.
@@ -428,7 +428,7 @@ function TemplatesSection() {
   const [templates, setTemplates] = useState([])
   const [msg, setMsg] = useState(null) // { text, type }
   const [busy, setBusy] = useState(false)
-  const [promptEnabled, setPromptEnabled] = useState(true) // ερώτηση έκδοσης μετά την εγγραφή
+  const [promptEnabled, setPromptEnabled] = useState(false) // ερώτηση έκδοσης πακέτου μετά την εγγραφή (default OFF)
 
   function reload() {
     api.listTemplates().then((r) => setTemplates(Array.isArray(r) ? r : []))
@@ -436,7 +436,7 @@ function TemplatesSection() {
   useEffect(reload, [])
 
   useEffect(() => {
-    api.getSettings().then((s) => setPromptEnabled(!s || s.enrollDocsPrompt !== '0'))
+    api.getSettings().then((s) => setPromptEnabled(!!s && s.enrollDocsPrompt === '1'))
   }, [])
 
   async function togglePrompt(e) {
@@ -493,7 +493,7 @@ function TemplatesSection() {
 
       <label className="mb-3 flex cursor-pointer items-center gap-2 rounded-md border border-slate-200 bg-slate-50 p-2 text-sm text-slate-600">
         <input type="checkbox" checked={promptEnabled} onChange={togglePrompt} />
-        Ερώτηση έκδοσης εγγράφων μετά την εγγραφή μαθητή/μαθητών
+        Ερώτηση έκδοσης πακέτου εγγραφής μετά την εγγραφή μαθητή/μαθητών
       </label>
 
       <div className="mb-3 flex flex-wrap items-center gap-3">
@@ -1186,6 +1186,31 @@ function UpdateSection() {
   )
 }
 
+function PrivacySection() {
+  const [enabled, setEnabled] = useState(true) // προεπιλεγμένα ενεργό (opt-out)
+
+  useEffect(() => {
+    api.getSettings().then((s) => setEnabled(!s || s.telemetry_enabled !== '0'))
+  }, [])
+
+  async function toggle(v) {
+    setEnabled(v)
+    await api.setSettings({ telemetry_enabled: v ? '1' : '0' })
+  }
+
+  return (
+    <div className="rounded-lg border border-slate-200 bg-white p-4">
+      <h3 className="mb-3 flex items-center gap-2 font-semibold text-slate-700">
+        <BarChart3 size={18} /> Στατιστικά χρήσης
+      </h3>
+      <label className="flex cursor-pointer items-center gap-2 rounded-md border border-slate-200 bg-slate-50 p-2 text-sm text-slate-600">
+        <input type="checkbox" checked={enabled} onChange={(e) => toggle(e.target.checked)} />
+        Αποστολή στατιστικών δεδομένων του προγράμματος - βοηθάτε το Μαθητολόγιο ΣΕΠ να γίνει καλύτερο.
+      </label>
+    </div>
+  )
+}
+
 export default function Settings({ version, bump, emailCheck, onEmailConfigChange }) {
   const [form, setForm] = useState({ sep: '', nomos: '', nomos_gen: '', domi: '', perif: '' })
   const [saved, setSaved] = useState(false)
@@ -1276,6 +1301,8 @@ export default function Settings({ version, bump, emailCheck, onEmailConfigChang
       <TemplatesSection />
 
       <PackagesSection />
+
+      <PrivacySection />
 
       <ResetSection bump={bump} />
     </div>

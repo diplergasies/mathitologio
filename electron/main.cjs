@@ -11,6 +11,35 @@ const importer = require('./importer.cjs')
 const documents = require('./documents.cjs')
 const mail = require('./mail.cjs')
 const updater = require('./updater.cjs')
+const telemetry = require('./telemetry.cjs')
+
+// ── App-wide error log + global handlers ──────────────────────────────────────
+// Ξεχωριστό αρχείο (main.log) από τον updater.log. Πλήρες stack μένει τοπικά· στο
+// telemetry πάει μόνο καθαρισμένο (βλ. telemetry.cjs).
+const log = require('electron-log/main')
+try {
+  log.initialize()
+  log.transports.file.fileName = 'main.log'
+  log.transports.file.level = 'info'
+} catch (e) {
+  console.error('log init', e)
+}
+process.on('uncaughtException', (err) => {
+  try {
+    log.error('uncaughtException', err && err.stack ? err.stack : err)
+    telemetry.reportError({ where: 'uncaught', err })
+  } catch {
+    /* noop */
+  }
+})
+process.on('unhandledRejection', (reason) => {
+  try {
+    log.error('unhandledRejection', reason && reason.stack ? reason.stack : reason)
+    telemetry.reportError({ where: 'unhandledRejection', err: reason instanceof Error ? reason : { message: String(reason) } })
+  } catch {
+    /* noop */
+  }
+})
 
 const isDev = !!process.env.VITE_DEV_SERVER_URL
 
@@ -223,6 +252,45 @@ function createWindow() {
 }
 
 // ---------------------------------------------------------------- IPC handlers
+
+// Thin wrapper πάνω από το ipcMain.handle: (1) μετρητές τηλεμετρίας ΜΟΝΟ για ενέργειες
+// (allowlist — αποκλείονται reads/pollers), (2) app-wide error log για κάθε αποτυχία
+// handler. Το σφάλμα ξανα-πετιέται ώστε ο renderer να το λαμβάνει όπως πριν.
+const ACTION_CHANNELS = new Set([
+  'import:xlsx', 'import:pdf', 'data:reset',
+  'students:addManual', 'students:enroll', 'students:setSchool', 'students:delete',
+  'students:restore', 'students:update', 'students:setColor', 'students:saveXlsx',
+  'students:bulkDelete', 'students:bulkRestore', 'students:purge', 'students:bulkPurge',
+  'students:bulkEnroll', 'promotion:apply',
+  'schools:add', 'schools:delete', 'schools:update',
+  'templates:add', 'templates:delete',
+  'documents:generate', 'documents:bulkGenerate', 'documents:generatePackage',
+  'calendar:addNote', 'calendar:updateNote', 'calendar:deleteNote', 'calendar:saveDocx',
+  'report:saveDocx', 'backup:now', 'backup:export', 'backup:import',
+  'mail:import', 'mail:runCalendarRules', 'mail:setConfig',
+])
+const rawHandle = ipcMain.handle.bind(ipcMain)
+ipcMain.handle = (channel, fn) =>
+  rawHandle(channel, async (event, ...args) => {
+    if (ACTION_CHANNELS.has(channel)) {
+      try {
+        telemetry.track(channel)
+      } catch {
+        /* noop */
+      }
+    }
+    try {
+      return await fn(event, ...args)
+    } catch (err) {
+      try {
+        log.error('ipc ' + channel, err && err.stack ? err.stack : err)
+        telemetry.reportError({ where: channel, err })
+      } catch {
+        /* noop */
+      }
+      throw err // ο renderer λαμβάνει το σφάλμα όπως και πριν
+    }
+  })
 
 ipcMain.handle('app:info', () => {
   const S = getSchoolYearStart()
@@ -2230,9 +2298,29 @@ app.whenReady().then(async () => {
   } catch (e) {
     console.error('updater init', e)
   }
+  // Ανώνυμη τηλεμετρία «insights» — best-effort, σέβεται opt-out & remote kill-switch.
+  try {
+    telemetry.init({
+      db,
+      getVersion: () => app.getVersion(),
+      getLocale: () => app.getLocale(),
+      getSchoolYear: () => db.getAllSettings().schoolYearStart || '',
+    })
+  } catch (e) {
+    console.error('telemetry init', e)
+  }
   app.on('activate', () => {
     if (BrowserWindow.getAllWindows().length === 0) createWindow()
   })
+})
+
+// Τελικό flush τηλεμετρίας στο κλείσιμο (best-effort, fire-and-forget).
+app.on('before-quit', () => {
+  try {
+    telemetry.flush()
+  } catch {
+    /* noop */
+  }
 })
 
 app.on('window-all-closed', () => {
