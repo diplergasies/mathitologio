@@ -1369,7 +1369,7 @@ ipcMain.handle('promotion:apply', (_e, promotedIds = []) => {
   return { ok: true, promoted, graduated, needSchool, yearStart, yearLabel: grades.schoolYearLabel(yearStart) }
 })
 
-ipcMain.handle('documents:bulkGenerate', async (_e, { ids = [], templateFiles = [], signees, signee } = {}) => {
+ipcMain.handle('documents:bulkGenerate', async (_e, { ids = [], templateFiles = [], signees, signee, signatures, extras } = {}) => {
   if (!templateFiles.length) return { error: 'Δεν επιλέχθηκαν templates' }
   const { canceled, filePaths } = await dialog.showOpenDialog({
     title: 'Επιλογή φακέλου αποθήκευσης εγγράφων',
@@ -1400,7 +1400,27 @@ ipcMain.handle('documents:bulkGenerate', async (_e, { ids = [], templateFiles = 
       const sg = computeSignee(s, cfg, choice)
       data['signee'] = sg.signee
       data['signee.prop'] = sg.prop
-      data['signee.sign'] = '' // γραμμή υπογραφής κενή (μαζική)· όνομα χωριστά ({{signee}})
+      data['signee.sign'] = '' // γραμμή υπογραφής: κενή (fallback) ή εικόνα (παρακάτω)
+      data['signee.note'] = computeSigneeNote(cfg, choice, s)
+    } else {
+      data['signee.note'] = ''
+    }
+    // Ελεύθερα πεδία που συμπλήρωσε ο χρήστης ανά ομάδα (extras[id]) — π.χ. σχολείο
+    // προορισμού ή σταθερά στοιχεία «?». Τα «?» τα θυμόμαστε για τις επόμενες εκδόσεις.
+    if (extras && extras[id] && typeof extras[id] === 'object') {
+      const remember = {}
+      for (const [k, v] of Object.entries(extras[id])) {
+        if (v == null) continue
+        data[k] = String(v)
+        if (k.startsWith(ASK_PREFIX) && String(v).trim()) remember[askKey(askLabel(k))] = String(v)
+      }
+      if (Object.keys(remember).length) db.setSettings(remember)
+    }
+    // Χειρόγραφη υπογραφή ανά μαθητή (από την ομάδα signee): εικόνα στη γραμμή {{signee.sign}}.
+    let images
+    const sig = signatures && signatures[id] && decodeDataUrl(signatures[id].dataUrl)
+    if (sig) {
+      images = { 'signee.sign': { pngBuffer: sig.buffer, wPx: signatures[id].wPx, hPx: signatures[id].hPx } }
     }
     for (const tf of templateFiles) {
       const templatePath = resolveTemplatePath(tf)
@@ -1421,6 +1441,7 @@ ipcMain.handle('documents:bulkGenerate', async (_e, { ids = [], templateFiles = 
         const pdf = documents.generate({
           templatePath,
           data: tdata,
+          images,
           resourcesPath: isDev ? null : process.resourcesPath,
           isDev,
           userDataPath: app.getPath('userData'),
@@ -1435,6 +1456,12 @@ ipcMain.handle('documents:bulkGenerate', async (_e, { ids = [], templateFiles = 
         failed.push(`${s.eponymo} ${s.onoma} / ${tf}: ${err.message}`)
       }
     }
+  }
+  // Άνοιγμα του φακέλου εξόδου στον explorer/finder μόλις παραχθεί έστω ένα PDF.
+  if (generated > 0) {
+    try {
+      await shell.openPath(outDir)
+    } catch {}
   }
   return { ok: true, generated, failed, outDir }
 })

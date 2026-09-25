@@ -1,4 +1,4 @@
-import { useMemo, useRef, useState } from 'react'
+import { useLayoutEffect, useMemo, useRef, useState } from 'react'
 import { ArrowDown, ArrowUp, ChevronsUpDown, Search, X, Palette, StickyNote } from 'lucide-react'
 import { batchColor, CODE_COLORS } from '../colors'
 import { fold, studentHaystack, matchSegments } from '../search'
@@ -33,6 +33,15 @@ export default function StudentTable({
   const cancelRef = useRef(false) // αποτρέπει αποθήκευση όταν το blur ακολουθεί Escape
   const [anchorId, setAnchorId] = useState(null) // άγκυρα για επιλογή εύρους με shift+κλικ
 
+  // Δυναμικό ύψος του πλαισίου του πίνακα: γεμίζει από τη θέση του μέχρι το κάτω μέρος
+  // του παραθύρου. Έτσι η οριζόντια μπάρα κύλισης μένει ΠΑΝΤΑ ορατή, ανεξάρτητα από
+  // πόσες μπάρες (π.χ. «N επιλεγμένοι», «Color code») εμφανίζονται από πάνω — σε αντίθεση
+  // με το παλιό σταθερό calc(100vh-15rem) που έκρυβε την μπάρα μόλις γινόταν μια επιλογή.
+  const scrollRef = useRef(null)
+  const [maxH, setMaxH] = useState(() =>
+    typeof window !== 'undefined' ? Math.max(200, window.innerHeight - 240) : 600
+  )
+
   const term = q.trim()
 
   const processed = useMemo(() => {
@@ -61,6 +70,20 @@ export default function StudentTable({
     }
     return list
   }, [students, sort, columns, searchable, term])
+
+  // Ξαναϋπολόγισε το ύψος όταν αλλάζει ο αριθμός επιλεγμένων (εμφανίζεται/κρύβεται η μπάρα
+  // επιλογής από πάνω), τα αποτελέσματα ή το μέγεθος του παραθύρου.
+  useLayoutEffect(() => {
+    const el = scrollRef.current
+    if (!el) return
+    const recompute = () => {
+      const top = el.getBoundingClientRect().top
+      setMaxH(Math.max(200, window.innerHeight - top - 24))
+    }
+    recompute()
+    window.addEventListener('resize', recompute)
+    return () => window.removeEventListener('resize', recompute)
+  }, [selectedIds.length, processed.length, term])
 
   function clickSort(c) {
     if (!c.sortable) return
@@ -247,11 +270,15 @@ export default function StudentTable({
           Κανένας μαθητής δεν ταιριάζει με «{term}».
         </div>
       ) : (
-        // overflow-auto + φραγμένο ύψος: η οριζόντια μπάρα κύλισης μένει στο κάτω
-        // μέρος του ορατού πλαισίου (όχι στο τέλος ενός ψηλού πίνακα), ώστε να είναι
+        // overflow-auto + δυναμικά φραγμένο ύψος (maxH): η οριζόντια μπάρα κύλισης μένει στο
+        // κάτω μέρος του ορατού πλαισίου (όχι στο τέλος ενός ψηλού πίνακα), ώστε να είναι
         // πάντα προσβάσιμη όταν δεν φαίνονται όλες οι στήλες του μαθητή. Η κεφαλίδα
         // γίνεται sticky για να μη χάνεται κατά την κάθετη κύλιση μέσα στο πλαίσιο.
-        <div className="max-h-[calc(100vh-15rem)] overflow-auto rounded-lg border border-slate-200 bg-white">
+        <div
+          ref={scrollRef}
+          style={{ maxHeight: maxH }}
+          className="overflow-auto rounded-lg border border-slate-200 bg-white"
+        >
           <table className="w-full border-collapse text-sm">
             <thead>
               <tr className="bg-slate-50 text-left text-slate-600 [&_th]:sticky [&_th]:top-0 [&_th]:z-10 [&_th]:bg-slate-50">
