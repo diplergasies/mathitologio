@@ -307,7 +307,7 @@ ipcMain.handle('app:info', () => {
 })
 
 // Μήνυμα προς τους χρήστες: το κείμενο ενός κοινόχρηστου Google Doc εμφανίζεται ως pop-up στην
-// έναρξη, ΜΙΑ φορά ανά διαφορετικό μήνυμα (dedup βάσει hash, αποθηκευμένο τοπικά). Best-effort:
+// έναρξη, ΜΙΑ φορά ανά διαφορετικό μήνυμα (dedup βάσει hash του κειμένου, αποθηκευμένο τοπικά). Best-effort:
 // σύντομο timeout, σιωπηλή αποτυχία, ΔΕΝ μπλοκάρει ποτέ την εκκίνηση (offline → απλώς null).
 const ANNOUNCEMENT_DOC_ID = '1HNQRyd4ue7R6sh7YVpJuAHNmStGO0PRM3m-9L25NFm4'
 ipcMain.handle('announcement:get', async () => {
@@ -323,11 +323,21 @@ ipcMain.handle('announcement:get', async () => {
     const text = html
       .replace(/<style[\s\S]*?<\/style>/gi, ' ')
       .replace(/<[^>]+>/g, ' ')
-      .replace(/&nbsp;|&#160;|&#xa0;|&zwnj;|&#8203;/gi, '')
+      .replace(/&nbsp;|&#160;|&#xa0;/gi, ' ')
+      .replace(/&zwnj;|&#8203;/gi, '')
+      .replace(/&#(\d+);/g, (_m, n) => String.fromCodePoint(Number(n)))
+      .replace(/&#x([0-9a-f]+);/gi, (_m, n) => String.fromCodePoint(parseInt(n, 16)))
+      .replace(/&quot;/g, '"')
+      .replace(/&#39;|&apos;/g, "'")
+      .replace(/&lt;/g, '<')
+      .replace(/&gt;/g, '>')
+      .replace(/&amp;/g, '&')
       .replace(/[\s​-‍﻿]+/g, ' ')
       .trim()
     if (!text) return null
-    const id = crypto.createHash('sha1').update(html).digest('hex')
+    // Το id βγαίνει από το ΚΕΙΜΕΝΟ, όχι από το HTML: το Google ανακατεύει τυχαία τα ονόματα κλάσεων
+    // CSS (.c0/.c1/…) σε κάθε export, οπότε το hash του HTML άλλαζε κάθε φορά → pop-up σε κάθε έναρξη.
+    const id = crypto.createHash('sha1').update(text).digest('hex')
     if ((db.getAllSettings().announcement_seen_id || '') === id) return null
     return { id, html }
   } catch (_e) {
