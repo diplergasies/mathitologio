@@ -217,6 +217,7 @@ export default function Students({ version, bump, showToast }) {
       <StudentTable
         students={students}
         columns={columns}
+        tableId="students"
         emptyText="Κανένας εγγεγραμμένος μαθητής."
         searchable
         selectable

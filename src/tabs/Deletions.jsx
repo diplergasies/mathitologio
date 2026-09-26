@@ -198,6 +198,7 @@ export default function Deletions({ version, bump, showToast }) {
       <StudentTable
         students={students}
         columns={columns}
+        tableId="deletions"
         emptyText="Καμία διαγραφή."
         searchable
         selectable

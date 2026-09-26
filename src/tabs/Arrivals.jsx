@@ -180,6 +180,7 @@ export default function Arrivals({ version, bump, showToast }) {
       <StudentTable
         students={students}
         columns={columns}
+        tableId="arrivals"
         emptyText="Καμία άφιξη. Κάνε εισαγωγή αρχείου XLSX."
         searchable
         selectable

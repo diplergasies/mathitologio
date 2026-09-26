@@ -1,7 +1,9 @@
-import { useLayoutEffect, useMemo, useRef, useState } from 'react'
+import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import { ArrowDown, ArrowUp, ChevronsUpDown, Search, X, Palette, StickyNote } from 'lucide-react'
 import { batchColor, CODE_COLORS } from '../colors'
 import { fold, studentHaystack, matchSegments } from '../search'
+import api from '../api'
+import ColumnPicker from './ColumnPicker'
 
 // Γενικός πίνακας μαθητών με χρωματισμό ανά batch, ταξινόμηση, αναζήτηση & επιλογή (checkboxes).
 // columns: [{ key, label, render?(student), sortable?, sortAccessor?(student) }]
@@ -12,9 +14,13 @@ import { fold, studentHaystack, matchSegments } from '../search'
 // renderActions?(student) -> JSX για τη στήλη ενεργειών.
 // selectable: εμφανίζει checkboxes. selectedIds: array. onToggle(id). onToggleAll(visibleIds, checked).
 // onCellSave(id, key, value): αποθήκευση inline επεξεργασίας κελιού (για στήλες με editable: true).
+// tableId: αν δοθεί, εμφανίζεται το μενού «Προβολή στηλών» και οι κρυφές στήλες αποθηκεύονται στις
+//   ρυθμίσεις (columns_hidden:<tableId>), ξεχωριστά ανά καρτέλα. Κρατάμε τις ΚΡΥΦΕΣ (όχι τις ορατές),
+//   ώστε μια νέα στήλη σε μελλοντική έκδοση να εμφανίζεται αυτόματα.
 export default function StudentTable({
   students,
-  columns,
+  columns: allColumns,
+  tableId,
   renderActions,
   emptyText,
   selectable,
@@ -32,6 +38,39 @@ export default function StudentTable({
   const [draft, setDraft] = useState('')
   const cancelRef = useRef(false) // αποτρέπει αποθήκευση όταν το blur ακολουθεί Escape
   const [anchorId, setAnchorId] = useState(null) // άγκυρα για επιλογή εύρους με shift+κλικ
+  const [hidden, setHidden] = useState(() => new Set()) // keys κρυφών στηλών
+
+  const hiddenKey = tableId ? `columns_hidden:${tableId}` : null
+
+  useEffect(() => {
+    if (!hiddenKey) return
+    let alive = true
+    api.getSettings().then((st) => {
+      if (!alive) return
+      try {
+        const arr = JSON.parse((st && st[hiddenKey]) || '[]')
+        if (Array.isArray(arr)) setHidden(new Set(arr.map(String)))
+      } catch {
+        // άκυρη τιμή: όλες οι στήλες ορατές
+      }
+    })
+    return () => {
+      alive = false
+    }
+  }, [hiddenKey])
+
+  function changeHidden(next) {
+    setHidden(next)
+    // Ταξινόμηση βάσει στήλης που μόλις κρύφτηκε → επαναφορά στην προεπιλεγμένη σειρά.
+    setSort((prev) => (prev && next.has(prev.key) ? null : prev))
+    if (hiddenKey) api.setSettings({ [hiddenKey]: JSON.stringify([...next]) })
+  }
+
+  // Ορατές στήλες· αν για κάποιο λόγο κρύβονται όλες, δείχνουμε όλες.
+  const columns = useMemo(() => {
+    const vis = allColumns.filter((c) => !hidden.has(c.key))
+    return vis.length ? vis : allColumns
+  }, [allColumns, hidden])
 
   // Δυναμικό ύψος του πλαισίου του πίνακα: γεμίζει από τη θέση του μέχρι το κάτω μέρος
   // του παραθύρου. Έτσι η οριζόντια μπάρα κύλισης μένει ΠΑΝΤΑ ορατή, ανεξάρτητα από
@@ -221,14 +260,21 @@ export default function StudentTable({
       </div>
     ) : null
 
+  const columnPicker = tableId ? (
+    <div className="ml-auto">
+      <ColumnPicker columns={allColumns} hidden={hidden} onChange={changeHidden} />
+    </div>
+  ) : null
+
   const toolbar =
-    searchBox || colorControl ? (
+    searchBox || colorControl || columnPicker ? (
       <div className="mb-3 flex flex-wrap items-center gap-3">
         {searchBox}
         {colorControl}
         {term && (
           <span className="text-xs text-slate-500">{processed.length} αποτελέσματα</span>
         )}
+        {columnPicker}
       </div>
     ) : null
 
