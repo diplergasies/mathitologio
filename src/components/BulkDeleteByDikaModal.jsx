@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react'
 import Modal from './Modal'
+import DeleteReasonModal from './DeleteReasonModal'
 import api from '../api'
 import { AlertTriangle } from 'lucide-react'
 
@@ -23,7 +24,7 @@ function actionLabel(st) {
 export default function BulkDeleteByDikaModal({ onClose, onDeleted }) {
   const [text, setText] = useState('')
   const [preview, setPreview] = useState(null) // { matched: [...], notFound: [...] }
-  const [reason, setReason] = useState('')
+  const [askReasons, setAskReasons] = useState(false) // pop-up λόγου για τους εγγεγραμμένους
   const [busy, setBusy] = useState(false)
   const [scope, setScope] = useState(null) // συνδυασμένη λίστα (αφίξεις + εγγεγραμμένοι)· null = φορτώνει
 
@@ -70,11 +71,22 @@ export default function BulkDeleteByDikaModal({ onClose, onDeleted }) {
   const purgeIds = preview ? preview.matched.filter((s) => s.status === 'arrival').map((s) => s.id) : []
   const softIds = preview ? preview.matched.filter((s) => s.status === 'enrolled').map((s) => s.id) : []
 
+  // Αν υπάρχουν εγγεγραμμένοι, πρώτα pop-up λόγου ανά μαθητή· αλλιώς κατευθείαν οριστική διαγραφή.
   async function confirmDelete() {
+    if (softIds.length) {
+      setAskReasons(true)
+      return
+    }
     setBusy(true)
     if (purgeIds.length) await api.bulkPurge(purgeIds)
-    if (softIds.length) await api.bulkDelete(softIds, reason.trim())
     setBusy(false)
+    onDeleted(preview.matched.length)
+    onClose()
+  }
+
+  async function deleteWithReasons(reasons) {
+    if (purgeIds.length) await api.bulkPurge(purgeIds)
+    await api.bulkDelete(softIds, null, reasons)
     onDeleted(preview.matched.length)
     onClose()
   }
@@ -116,6 +128,22 @@ export default function BulkDeleteByDikaModal({ onClose, onDeleted }) {
       </button>
     </>
   )
+
+  if (askReasons && preview) {
+    return (
+      <DeleteReasonModal
+        title="Λόγος διαγραφής"
+        message={
+          softIds.length > 1
+            ? `Οι ${softIds.length} εγγεγραμμένοι μαθητές θα μεταφερθούν στις Διαγραφές. Διάλεξε λόγο για τον καθένα:`
+            : 'Ο μαθητής θα μεταφερθεί στις Διαγραφές. Διάλεξε τον λόγο διαγραφής:'
+        }
+        students={preview.matched.filter((s) => s.status === 'enrolled')}
+        onConfirm={deleteWithReasons}
+        onClose={() => setAskReasons(false)}
+      />
+    )
+  }
 
   return (
     <Modal title="Μαζική διαγραφή με ΔΙΚΑ" onClose={onClose} footer={footer}>
@@ -192,18 +220,9 @@ export default function BulkDeleteByDikaModal({ onClose, onDeleted }) {
           )}
 
           {softIds.length > 0 && (
-            <div>
-              <label className="mb-1 block text-sm text-slate-600">
-                Λόγος αποχώρησης (μόνο για όσους πάνε στις Διαγραφές, προαιρετικό)
-              </label>
-              <textarea
-                value={reason}
-                onChange={(e) => setReason(e.target.value)}
-                rows={2}
-                placeholder="π.χ. αναχώρηση από τη δομή, μετεγγραφή…"
-                className="w-full rounded-md border border-slate-300 px-3 py-2 text-sm focus:border-blue-400 focus:outline-none"
-              />
-            </div>
+            <p className="text-xs text-slate-500">
+              Για όσους πάνε στις Διαγραφές θα σου ζητηθεί στη συνέχεια ο λόγος διαγραφής.
+            </p>
           )}
 
           {preview.notFound.length > 0 && (

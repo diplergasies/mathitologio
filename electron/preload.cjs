@@ -42,7 +42,8 @@ contextBridge.exposeInMainWorld('api', {
   generatePackage: (payload) => ipcRenderer.invoke('documents:generatePackage', payload),
   choosePackageFolder: () => ipcRenderer.invoke('package:chooseFolder'),
 
-  bulkDelete: (ids, reason) => ipcRenderer.invoke('students:bulkDelete', { ids, reason }),
+  // reasons (προαιρετικό): { [id]: λόγος }, δηλαδή λόγος ανά μαθητή, υπερισχύει του κοινού reason.
+  bulkDelete: (ids, reason, reasons) => ipcRenderer.invoke('students:bulkDelete', { ids, reason, reasons }),
   bulkRestore: (ids) => ipcRenderer.invoke('students:bulkRestore', ids),
   purgeStudent: (id) => ipcRenderer.invoke('students:purge', id),
   bulkPurge: (ids) => ipcRenderer.invoke('students:bulkPurge', ids),

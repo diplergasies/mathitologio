@@ -1202,15 +1202,19 @@ ipcMain.handle('mail:runCalendarRules', async () => runCalendarRules())
 // ---- Μαζικές ενέργειες ----------------------------------------------------
 
 ipcMain.handle('students:bulkDelete', (_e, payload = []) => {
-  // Συμβατότητα: δέχεται είτε πίνακα ids είτε { ids, reason }.
+  // Συμβατότητα: δέχεται είτε πίνακα ids είτε { ids, reason, reasons }. Το reasons ({ [id]: λόγος })
+  // δίνει λόγο ΑΝΑ ΜΑΘΗΤΗ και υπερισχύει του κοινού reason.
   const ids = Array.isArray(payload) ? payload : payload.ids || []
   const reason = Array.isArray(payload) ? null : payload.reason || null
-  ids.forEach((id) =>
+  const reasons = !Array.isArray(payload) && payload.reasons && typeof payload.reasons === 'object' ? payload.reasons : null
+  ids.forEach((id) => {
+    const own = reasons && Object.prototype.hasOwnProperty.call(reasons, String(id))
+    const r = own ? (reasons[String(id)] && String(reasons[String(id)]).trim()) || null : reason
     db.run(
       `UPDATE students SET prev_status=status, status='deleted', deleted_at=$now, deletion_reason=$r, updated_at=$now WHERE id=$id`,
-      { $now: nowIso(), $r: reason, $id: id }
+      { $now: nowIso(), $r: r, $id: id }
     )
-  )
+  })
   return { ok: true, count: ids.length }
 })
 

@@ -1,5 +1,6 @@
 import { useState } from 'react'
 import Modal from './Modal'
+import DeleteReasonModal from './DeleteReasonModal'
 import api from '../api'
 import { AlertTriangle, Trash2 } from 'lucide-react'
 
@@ -19,7 +20,7 @@ function actionLabel(st) {
 export default function DepartureDetectionModal({ departed, onClose, onDone }) {
   const [rows, setRows] = useState(departed || []) // τοπικό αντίγραφο ώστε ατομικές διαγραφές να αφαιρούν γραμμές
   const [sel, setSel] = useState(() => new Set((departed || []).map((s) => s.id))) // όλοι επιλεγμένοι by default
-  const [reason, setReason] = useState('')
+  const [reasonFor, setReasonFor] = useState(null) // { students, purge } προς διαγραφή με λόγο
   const [busy, setBusy] = useState(false)
 
   const selectedRows = rows.filter((s) => sel.has(s.id))
@@ -54,23 +55,38 @@ export default function DepartureDetectionModal({ departed, onClose, onDone }) {
     if (remaining.length === 0) onClose()
   }
 
-  // Μαζική διαγραφή των επιλεγμένων.
+  // Μαζική διαγραφή των επιλεγμένων. Αν υπάρχουν εγγεγραμμένοι, πρώτα pop-up λόγου ανά μαθητή.
   async function confirmDelete() {
     if (!purgeIds.length && !softIds.length) return
+    if (softIds.length) {
+      setReasonFor({ students: selectedRows.filter((s) => s.status === 'enrolled'), purge: purgeIds })
+      return
+    }
     setBusy(true)
-    if (purgeIds.length) await api.bulkPurge(purgeIds)
-    if (softIds.length) await api.bulkDelete(softIds, reason.trim())
+    await api.bulkPurge(purgeIds)
     setBusy(false)
-    removeRows([...purgeIds, ...softIds])
+    removeRows(purgeIds)
   }
 
-  // Ατομική διαγραφή ενός μαθητή.
+  // Ατομική διαγραφή ενός μαθητή (εγγεγραμμένος → pop-up λόγου).
   async function deleteOne(s) {
+    if (s.status !== 'arrival') {
+      setReasonFor({ students: [s], purge: [] })
+      return
+    }
     setBusy(true)
-    if (s.status === 'arrival') await api.purgeStudent(s.id)
-    else await api.deleteStudent(s.id, reason.trim())
+    await api.purgeStudent(s.id)
     setBusy(false)
     removeRows([s.id])
+  }
+
+  // Εκτέλεση μετά την επιλογή λόγων: αφίξεις οριστικά, εγγεγραμμένοι στις Διαγραφές με τον λόγο τους.
+  async function deleteWithReasons(reasons) {
+    const { students, purge } = reasonFor
+    const soft = students.map((s) => s.id)
+    if (purge.length) await api.bulkPurge(purge)
+    await api.bulkDelete(soft, null, reasons)
+    removeRows([...purge, ...soft])
   }
 
   const selCount = selectedRows.length
@@ -95,6 +111,22 @@ export default function DepartureDetectionModal({ departed, onClose, onDone }) {
       </button>
     </>
   )
+
+  if (reasonFor) {
+    return (
+      <DeleteReasonModal
+        title="Λόγος διαγραφής"
+        message={
+          reasonFor.students.length > 1
+            ? `Οι ${reasonFor.students.length} εγγεγραμμένοι μαθητές θα μεταφερθούν στις Διαγραφές. Διάλεξε λόγο για τον καθένα:`
+            : 'Ο μαθητής θα μεταφερθεί στις Διαγραφές. Διάλεξε τον λόγο διαγραφής:'
+        }
+        students={reasonFor.students}
+        onConfirm={deleteWithReasons}
+        onClose={() => setReasonFor(null)}
+      />
+    )
+  }
 
   return (
     <Modal title="Εντοπίστηκε ότι διαγράφηκαν οι παρακάτω:" onClose={onClose} footer={footer}>
@@ -157,18 +189,9 @@ export default function DepartureDetectionModal({ departed, onClose, onDone }) {
         </div>
 
         {softIds.length > 0 && (
-          <div>
-            <label className="mb-1 block text-sm text-slate-600">
-              Λόγος αποχώρησης (μόνο για όσους πάνε στις Διαγραφές, προαιρετικό)
-            </label>
-            <textarea
-              value={reason}
-              onChange={(e) => setReason(e.target.value)}
-              rows={2}
-              placeholder="π.χ. αναχώρηση από τη δομή, μετεγγραφή…"
-              className="w-full rounded-md border border-slate-300 px-3 py-2 text-sm focus:border-blue-400 focus:outline-none"
-            />
-          </div>
+          <p className="text-xs text-slate-500">
+            Για όσους πάνε στις Διαγραφές θα σου ζητηθεί στη συνέχεια ο λόγος διαγραφής.
+          </p>
         )}
 
         {rows.length === 0 && (

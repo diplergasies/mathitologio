@@ -273,9 +273,10 @@ export default function Students({ version, bump, showToast }) {
       {delFor && (
         <DeleteReasonModal
           title="Διαγραφή μαθητή"
-          message={`Διαγραφή του μαθητή ${delFor.eponymo} ${delFor.onoma};`}
-          onConfirm={async (reason) => {
-            await api.deleteStudent(delFor.id, reason)
+          message="Ο μαθητής θα μεταφερθεί στις Διαγραφές. Διάλεξε τον λόγο διαγραφής:"
+          students={[delFor]}
+          onConfirm={async (reasons) => {
+            await api.bulkDelete([delFor.id], null, reasons)
             bump()
           }}
           onClose={() => setDelFor(null)}
@@ -285,10 +286,10 @@ export default function Students({ version, bump, showToast }) {
       {bulkDel && (
         <DeleteReasonModal
           title="Μαζική διαγραφή"
-          message={`Μαζική διαγραφή ${sel.ids.length} μαθητών;`}
-          count={`${sel.ids.length} μαθητών`}
-          onConfirm={async (reason) => {
-            await api.bulkDelete(sel.ids, reason)
+          message={`Οι ${sel.ids.length} μαθητές θα μεταφερθούν στις Διαγραφές. Διάλεξε λόγο για τον καθένα:`}
+          students={students.filter((s) => sel.ids.includes(s.id))}
+          onConfirm={async (reasons) => {
+            await api.bulkDelete(sel.ids, null, reasons)
             sel.clear()
             bump()
           }}
