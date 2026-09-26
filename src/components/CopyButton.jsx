@@ -1,17 +1,41 @@
 import { useState } from 'react'
 import { Copy, Check } from 'lucide-react'
 
+// Εφεδρική αντιγραφή (αν το navigator.clipboard απορριφθεί): κρυφό textarea + execCommand.
+function legacyCopy(text) {
+  const ta = document.createElement('textarea')
+  ta.value = text
+  ta.setAttribute('readonly', '')
+  ta.style.position = 'fixed'
+  ta.style.opacity = '0'
+  document.body.appendChild(ta)
+  ta.select()
+  let ok = false
+  try {
+    ok = document.execCommand('copy')
+  } catch {
+    ok = false
+  }
+  document.body.removeChild(ta)
+  return ok
+}
+
 // Κουμπί αντιγραφής τιμής στο πρόχειρο (clipboard). Δουλεύει στο Electron renderer.
 export default function CopyButton({ value, title = 'Αντιγραφή' }) {
   const [done, setDone] = useState(false)
 
   async function copy() {
+    const text = String(value ?? '')
+    let ok = false
     try {
-      await navigator.clipboard.writeText(String(value ?? ''))
+      await navigator.clipboard.writeText(text)
+      ok = true
+    } catch {
+      ok = legacyCopy(text)
+    }
+    if (ok) {
       setDone(true)
       setTimeout(() => setDone(false), 1200)
-    } catch {
-      // Σιωπηλή αποτυχία — αν δεν υπάρχει clipboard API, δεν κάνουμε τίποτα.
     }
   }
 

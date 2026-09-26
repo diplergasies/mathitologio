@@ -2307,13 +2307,17 @@ function warmUpLibreOffice() {
 app.whenReady().then(async () => {
   await db.init(app.getPath('userData'))
 
-  // Άδεια χρήσης κάμερας (λήψη ταυτοποιητικού). Επιτρέπουμε ΜΟΝΟ 'media'· ό,τι άλλο
-  // απορρίπτεται. Απαραίτητο γιατί δεν υπάρχει άλλος handler → default συμπεριφορά.
+  // Άδειες renderer: κάμερα (λήψη ταυτοποιητικού) + εγγραφή στο πρόχειρο (κουμπιά
+  // «Αντιγραφή», π.χ. Παρατηρητήριο — το navigator.clipboard.writeText ζητά
+  // 'clipboard-sanitized-write'). Ό,τι άλλο απορρίπτεται (και η ανάγνωση προχείρου).
+  const ALLOWED_PERMISSIONS = new Set(['media', 'clipboard-sanitized-write'])
   try {
     session.defaultSession.setPermissionRequestHandler((_wc, permission, cb) => {
-      cb(permission === 'media')
+      cb(ALLOWED_PERMISSIONS.has(permission))
     })
-    session.defaultSession.setPermissionCheckHandler((_wc, permission) => permission === 'media')
+    session.defaultSession.setPermissionCheckHandler((_wc, permission) =>
+      ALLOWED_PERMISSIONS.has(permission)
+    )
   } catch (e) {
     console.error('permission handler', e)
   }
