@@ -2,10 +2,11 @@ import { useEffect, useState } from 'react'
 import api from '../api'
 import StudentTable from '../components/StudentTable'
 import StudentNoteModal from '../components/StudentNoteModal'
+import DeleteReasonModal from '../components/DeleteReasonModal'
 import FyloCell from '../components/FyloCell'
 import { useSelection } from '../useSelection'
 import { useConfirm } from '../components/ConfirmProvider'
-import { Undo2, Users, Trash2, Pencil, Check, X } from 'lucide-react'
+import { Undo2, Users, Trash2, Pencil } from 'lucide-react'
 import { isoToDMY } from '../calendarUtils'
 
 function fmtDeleted(iso) {
@@ -19,8 +20,7 @@ function fmtDeleted(iso) {
 export default function Deletions({ version, bump, showToast }) {
   const confirm = useConfirm()
   const [students, setStudents] = useState([])
-  const [editId, setEditId] = useState(null)
-  const [editReason, setEditReason] = useState('')
+  const [reasonFor, setReasonFor] = useState(null)
   const [noteFor, setNoteFor] = useState(null)
   const sel = useSelection()
 
@@ -41,16 +41,6 @@ export default function Deletions({ version, bump, showToast }) {
     }
     bump()
     return true
-  }
-
-  function startEditReason(s) {
-    setEditId(s.id)
-    setEditReason(s.deletion_reason || '')
-  }
-
-  async function saveReason() {
-    await update(editId, { deletion_reason: editReason.trim() })
-    setEditId(null)
   }
 
   async function saveCell(id, key, value) {
@@ -84,43 +74,16 @@ export default function Deletions({ version, bump, showToast }) {
     {
       key: 'deletion_reason',
       label: 'Λόγος διαγραφής',
-      render: (s) =>
-        editId === s.id ? (
-          <div className="flex items-center gap-1">
-            <input
-              value={editReason}
-              onChange={(e) => setEditReason(e.target.value)}
-              onKeyDown={(e) => e.key === 'Enter' && saveReason()}
-              autoFocus
-              className="w-40 rounded-md border border-slate-300 px-2 py-1 text-sm"
-            />
-            <button
-              onClick={saveReason}
-              title="Αποθήκευση"
-              className="rounded-md border border-green-200 p-1 text-green-700 hover:bg-green-50"
-            >
-              <Check size={14} />
-            </button>
-            <button
-              onClick={() => setEditId(null)}
-              title="Άκυρο"
-              className="rounded-md border border-slate-200 p-1 text-slate-500 hover:bg-slate-50"
-            >
-              <X size={14} />
-            </button>
-          </div>
-        ) : (
-          <button
-            onClick={() => startEditReason(s)}
-            title="Επεξεργασία λόγου"
-            className="inline-flex items-center gap-1 text-left text-slate-600 hover:text-blue-600"
-          >
-            <span className={s.deletion_reason ? '' : 'text-slate-300'}>
-              {s.deletion_reason || '—'}
-            </span>
-            <Pencil size={12} className="text-slate-400" />
-          </button>
-        ),
+      render: (s) => (
+        <button
+          onClick={() => setReasonFor(s)}
+          title="Αλλαγή λόγου διαγραφής"
+          className="inline-flex items-center gap-1 text-left text-slate-600 hover:text-blue-600"
+        >
+          <span className={s.deletion_reason ? '' : 'text-slate-300'}>{s.deletion_reason || '—'}</span>
+          <Pencil size={12} className="text-slate-400" />
+        </button>
+      ),
     },
     {
       key: 'prev_status',
@@ -233,6 +196,20 @@ export default function Deletions({ version, bump, showToast }) {
           student={noteFor}
           onClose={() => setNoteFor(null)}
           onSave={async (text) => { await update(noteFor.id, { note: text }); setNoteFor(null) }}
+        />
+      )}
+
+      {reasonFor && (
+        <DeleteReasonModal
+          title="Λόγος διαγραφής"
+          message="Άλλαξε τον λόγο διαγραφής:"
+          students={[reasonFor]}
+          initialReasons={{ [reasonFor.id]: reasonFor.deletion_reason }}
+          confirmLabel="Αποθήκευση"
+          onConfirm={async (r) => {
+            await update(reasonFor.id, { deletion_reason: r[reasonFor.id] })
+          }}
+          onClose={() => setReasonFor(null)}
         />
       )}
     </div>

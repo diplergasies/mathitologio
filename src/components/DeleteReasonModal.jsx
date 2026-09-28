@@ -2,7 +2,7 @@ import { useEffect, useState } from 'react'
 import Modal from './Modal'
 import api from '../api'
 import { defaultReason, loadSavedReasons, dedupeReasons, REASONS_KEY } from '../lib/deletionReasons'
-import { Trash2, X } from 'lucide-react'
+import { Check, Trash2, X } from 'lucide-react'
 
 // Επιλογή λόγου ανά μαθητή: 'p:<κείμενο>' (προεπιλεγμένος ή συνηθισμένος λόγος), 'other' ή 'blank'.
 const OTHER = 'other'
@@ -13,7 +13,17 @@ const preset = (text) => `p:${text}`
 // (προεπιλογή), οι συνηθισμένοι λόγοι του χρήστη, «Άλλο» (ελεύθερο κείμενο που μπορεί να
 // αποθηκευτεί ως συνηθισμένος λόγος) και «Κενό». Με πολλούς μαθητές υπάρχει και γραμμή «Για όλους».
 // onConfirm(reasons): reasons = { [id]: κείμενο λόγου ή null }.
-export default function DeleteReasonModal({ title = 'Διαγραφή μαθητή', message, students = [], onConfirm, onClose }) {
+// initialReasons ({ [id]: κείμενο ή null }): προεπιλογή με τον υπάρχοντα λόγο (αλλαγή λόγου από τις Διαγραφές).
+// confirmLabel: κουμπί αποθήκευσης αντί για «Διαγραφή».
+export default function DeleteReasonModal({
+  title = 'Διαγραφή μαθητή',
+  message,
+  students = [],
+  initialReasons,
+  confirmLabel,
+  onConfirm,
+  onClose,
+}) {
   const [loaded, setLoaded] = useState(false)
   const [defReason, setDefReason] = useState('')
   const [saved, setSaved] = useState([])
@@ -28,10 +38,25 @@ export default function DeleteReasonModal({ title = 'Διαγραφή μαθητ
     api.getSettings().then((s) => {
       const def = defaultReason(s || {})
       setDefReason(def)
-      setSaved(loadSavedReasons(s || {}))
+      const sv = loadSavedReasons(s || {})
+      setSaved(sv)
       const init = {}
-      for (const st of students) init[st.id] = preset(def)
+      const initText = {}
+      for (const st of students) {
+        if (!initialReasons || !(st.id in initialReasons)) {
+          init[st.id] = preset(def)
+          continue
+        }
+        const cur = String(initialReasons[st.id] || '').trim()
+        if (!cur) init[st.id] = BLANK
+        else if (cur === def || sv.includes(cur)) init[st.id] = preset(cur)
+        else {
+          init[st.id] = OTHER
+          initText[st.id] = cur
+        }
+      }
       setChoice(init)
+      setOtherText(initText)
       setAll({ choice: preset(def), text: '', save: false })
       setLoaded(true)
     })
@@ -90,7 +115,7 @@ export default function DeleteReasonModal({ title = 'Διαγραφή μαθητ
       await onConfirm(reasons)
     } catch (e) {
       setBusy(false)
-      setError(`Αποτυχία διαγραφής: ${e && e.message ? e.message : e}`)
+      setError(`${confirmLabel ? 'Αποτυχία αποθήκευσης' : 'Αποτυχία διαγραφής'}: ${e && e.message ? e.message : e}`)
       return
     }
     setBusy(false)
@@ -161,9 +186,14 @@ export default function DeleteReasonModal({ title = 'Διαγραφή μαθητ
       <button
         onClick={confirm}
         disabled={busy || !loaded || !students.length}
-        className="inline-flex items-center gap-1.5 rounded-md bg-red-600 px-3 py-1.5 text-sm font-medium text-white hover:bg-red-700 disabled:opacity-40"
+        className={`inline-flex items-center gap-1.5 rounded-md px-3 py-1.5 text-sm font-medium text-white disabled:opacity-40 ${
+          confirmLabel ? 'bg-blue-600 hover:bg-blue-700' : 'bg-red-600 hover:bg-red-700'
+        }`}
       >
-        <Trash2 size={15} /> {busy ? 'Γίνεται…' : many ? `Διαγραφή ${students.length} μαθητών` : 'Διαγραφή'}
+        {confirmLabel ? <Check size={15} /> : <Trash2 size={15} />}{' '}
+        {busy
+          ? 'Γίνεται…'
+          : confirmLabel || (many ? `Διαγραφή ${students.length} μαθητών` : 'Διαγραφή')}
       </button>
     </>
   )
