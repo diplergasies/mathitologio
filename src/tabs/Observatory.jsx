@@ -1,7 +1,15 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import api from '../api'
 import CopyButton from '../components/CopyButton'
-import { ClipboardList, Layers, School, Accessibility, UserMinus } from 'lucide-react'
+import { ClipboardList, Layers, School, Accessibility, UserMinus, Activity, UserRound, GraduationCap, Handshake, Building2, Users, BookOpen, Megaphone, MessageSquareText } from 'lucide-react'
+import { OBS_SECTIONS, periodKey } from '../lib/observatoryFields'
+
+// Εικονίδιο ανά ενότητα επεξεργάσιμων πεδίων.
+const SECTION_ICONS = {
+  A2: Activity, A3: UserRound, B: GraduationCap, D1: Handshake, D2: Building2,
+  E: Users, ST: BookOpen, Z: Megaphone, TH: MessageSquareText,
+}
+const SAVE_DELAY_MS = 600
 
 const MONTHS = [
   'Ιανουάριος', 'Φεβρουάριος', 'Μάρτιος', 'Απρίλιος', 'Μάιος', 'Ιούνιος',
@@ -81,6 +89,28 @@ function FieldText({ label, value, onChange, rows = 1 }) {
   )
 }
 
+// Επεξεργάσιμο πεδίο που ΑΠΟΘΗΚΕΥΕΤΑΙ (ανά 15νθήμερο). Μεγαλώνει με το περιεχόμενο.
+function SavedField({ field, value, onChange }) {
+  const lines = (value || '').split('\n').length
+  return (
+    <div className="border-t border-slate-100 px-3 py-2 first:border-t-0">
+      <div className="mb-1 flex items-start justify-between gap-2">
+        <span className="text-sm font-medium text-slate-700">
+          {field.code} — {field.label}
+        </span>
+        <CopyButton value={value} />
+      </div>
+      <textarea
+        value={value ?? ''}
+        onChange={(e) => onChange(e.target.value)}
+        rows={Math.min(Math.max(2, lines + 1), 14)}
+        placeholder="Γράψτε εδώ ή στείλτε σημειώσεις από το Ημερολόγιο…"
+        className="w-full rounded-md border border-slate-300 px-2 py-1 text-sm"
+      />
+    </div>
+  )
+}
+
 function Section({ icon: Icon, title, children }) {
   return (
     <div className="overflow-hidden rounded-lg border border-slate-200 bg-white">
@@ -99,10 +129,53 @@ export default function Observatory({ version }) {
   const [half, setHalf] = useState(now.getDate() <= 15 ? 1 : 2)
   const [data, setData] = useState(null)
   const [vals, setVals] = useState({}) // επεξεργάσιμα κείμενα ανά πεδίο φόρμας
+  const [saved, setSaved] = useState({}) // αποθηκευμένα κείμενα (μη υπολογιζόμενα πεδία) του 15νθημέρου
+  const pending = useRef(new Map()) // `${period}|${field}` → { period, field, value, timer }
+  const period = periodKey(year, month, half)
 
   useEffect(() => {
     api.observatoryStats({ year, month, half }).then(setData)
   }, [year, month, half, version])
+
+  useEffect(() => {
+    let cancelled = false
+    api.observatoryGetValues(period).then((v) => {
+      if (!cancelled) setSaved(v || {})
+    })
+    return () => {
+      cancelled = true
+    }
+  }, [period, version])
+
+  // Αποθήκευση με μικρή καθυστέρηση· το period «κλειδώνει» τη στιγμή της αλλαγής, ώστε αλλαγή
+  // 15νθημέρου πριν την αποθήκευση να μη γράψει σε λάθος περίοδο.
+  function flush(key) {
+    const p = pending.current.get(key)
+    if (!p) return
+    clearTimeout(p.timer)
+    pending.current.delete(key)
+    api.observatorySetValue({ period: p.period, field: p.field, value: p.value })
+  }
+
+  function setSavedField(field) {
+    return (value) => {
+      setSaved((prev) => ({ ...prev, [field]: value }))
+      const key = `${period}|${field}`
+      const prev = pending.current.get(key)
+      if (prev) clearTimeout(prev.timer)
+      const timer = setTimeout(() => flush(key), SAVE_DELAY_MS)
+      pending.current.set(key, { period, field, value, timer })
+    }
+  }
+
+  // Κατά την έξοδο από την καρτέλα: αποθήκευση ό,τι εκκρεμεί.
+  useEffect(() => {
+    const map = pending.current
+    return () => {
+      for (const key of [...map.keys()]) flush(key)
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [])
 
   // Αρχικοποίηση των επεξεργάσιμων κειμένων από τα υπολογισμένα δεδομένα.
   useEffect(() => {
@@ -176,6 +249,8 @@ export default function Observatory({ version }) {
         Νέες εγγραφές περιόδου <span className="font-medium text-slate-700">{data.period}</span> —
         σύνολο <span className="font-medium text-slate-700">{data.total}</span>. Κάθε πεδίο είναι
         επεξεργάσιμο· το κουμπί αντιγράφει ολόκληρο το κείμενο για επικόλληση στη φόρμα του Παρατηρητηρίου.
+        Τα αριθμητικά πεδία υπολογίζονται αυτόματα· τα υπόλοιπα αποθηκεύονται για το επιλεγμένο
+        15νθήμερο και δέχονται σημειώσεις από το Ημερολόγιο.
       </p>
 
       {/* Α1 — εγγραφές + διαγραφές + τελικό σύνολο (ένα ενιαίο μπλοκ) */}
@@ -204,6 +279,10 @@ export default function Observatory({ version }) {
         <FieldText label="Α3.1 — Ασυνόδευτοι" value={vals.asyn} onChange={set('asyn')} />
       </Section>
 
+      {renderSection('A2')}
+      {renderSection('A3')}
+      {renderSection('B')}
+
       {/* Γ — Ζητήματα σχολικής διαρροής (διακοπές φοίτησης της περιόδου) */}
       <Section icon={UserMinus} title="Γ — Ζητήματα σχολικής διαρροής">
         <p className="px-3 pt-2 text-xs text-slate-400">
@@ -217,7 +296,26 @@ export default function Observatory({ version }) {
           onChange={set('gamma3')}
           rows={Math.min(2 + (data.dropoutReasons?.length || 0), 8)}
         />
+        {renderFields('G')}
       </Section>
+
+      {['D1', 'D2', 'E', 'ST', 'Z', 'TH'].map((id) => renderSection(id))}
     </div>
   )
+
+  function renderFields(id) {
+    const sec = OBS_SECTIONS.find((s) => s.id === id)
+    return sec.fields.map((f) => (
+      <SavedField key={f.key} field={f} value={saved[f.key] || ''} onChange={setSavedField(f.key)} />
+    ))
+  }
+
+  function renderSection(id) {
+    const sec = OBS_SECTIONS.find((s) => s.id === id)
+    return (
+      <Section key={id} icon={SECTION_ICONS[id] || ClipboardList} title={sec.title}>
+        {renderFields(id)}
+      </Section>
+    )
+  }
 }

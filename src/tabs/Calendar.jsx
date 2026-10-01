@@ -8,6 +8,7 @@ import {
 } from '../calendarUtils'
 import { ChevronLeft, ChevronRight, ChevronDown, Plus, Pencil, Trash2, Check, X, CalendarDays, Download } from 'lucide-react'
 import { exportCalendarDocx } from '../calendarExport'
+import SendToObservatory from '../components/SendToObservatory'
 
 // Ρυθμίσεις εμφάνισης ανά είδος γεγονότος. Τα γεγονότα μαθητών (arrival/enrollment/deletion)
 // έχουν `field`: την πραγματική στήλη που αλλάζει η επεξεργασία ημερομηνίας.
@@ -340,7 +341,8 @@ function DayView({ dayKey, events, onOpen }) {
             <li key={`n${i}`} className="flex items-center gap-2">
               <span className={`rounded px-1.5 py-0.5 text-xs ring-1 ${KIND.note.chip}`}>{KIND.note.label}</span>
               <span className="text-sm text-slate-700">{e.title}</span>
-              {e.note ? <span className="text-xs text-slate-400">— {e.note}</span> : null}
+              {e.note ? <span className="min-w-0 flex-1 truncate text-xs text-slate-400">— {e.note}</span> : <span className="flex-1" />}
+              <SendToObservatory note={e} />
             </li>
           ))}
         </ul>
@@ -446,6 +448,7 @@ function DayPanel({ dayKey, events, onClose, onAddNote, onEditNote, onSaveAutoDa
                 <div className="truncate text-sm text-slate-700">{e.title}</div>
                 {e.note ? <div className="truncate text-xs text-slate-400">{e.note}</div> : null}
               </div>
+              <SendToObservatory note={e} />
               <button onClick={() => onEditNote(e)} title="Επεξεργασία σημείωσης" className="rounded p-1 text-slate-400 hover:bg-slate-100 hover:text-blue-600">
                 <Pencil size={14} />
               </button>

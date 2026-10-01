@@ -1,6 +1,6 @@
 'use strict'
 
-const { app, BrowserWindow, ipcMain, dialog, shell, safeStorage, session } = require('electron')
+const { app, BrowserWindow, ipcMain, dialog, shell, safeStorage, session, screen, net } = require('electron')
 const fs = require('fs')
 const path = require('path')
 const crypto = require('crypto')
@@ -266,6 +266,7 @@ const ACTION_CHANNELS = new Set([
   'templates:add', 'templates:delete',
   'documents:generate', 'documents:bulkGenerate', 'documents:generatePackage',
   'calendar:addNote', 'calendar:updateNote', 'calendar:deleteNote', 'calendar:saveDocx',
+  'observatory:appendNote', 'contact:send',
   'report:saveDocx', 'backup:now', 'backup:export', 'backup:import',
   'mail:import', 'mail:runCalendarRules', 'mail:setConfig',
 ])
@@ -280,7 +281,18 @@ ipcMain.handle = (channel, fn) =>
       }
     }
     try {
-      return await fn(event, ...args)
+      const result = await fn(event, ...args)
+      // Λειτουργίες που αποτυγχάνουν «ήσυχα» επιστρέφοντας { error } (π.χ. σάρωση e-mail που
+      // έκοψε ο server) καταγράφονται κι αυτές — αλλιώς δεν θα τις βλέπαμε ποτέ στα insights.
+      if (result && typeof result === 'object' && typeof result.error === 'string' && result.error) {
+        try {
+          log.warn('ipc ' + channel + ' → error:', result.error)
+          telemetry.reportError({ where: channel, err: { name: 'HandledError', message: result.error }, kind: 'handled' })
+        } catch {
+          /* noop */
+        }
+      }
+      return result
     } catch (err) {
       try {
         log.error('ipc ' + channel, err && err.stack ? err.stack : err)
@@ -949,6 +961,61 @@ ipcMain.handle('calendar:deleteNote', (_e, id) => {
 })
 
 // Αποθήκευση του Ημερολογίου (buffer .docx από το renderer) σε αρχείο Word.
+// ---- Παρατηρητήριο: αποθηκευμένα κείμενα πεδίων ανά 15νθήμερο -------------------
+// Μόνο τα ΜΗ υπολογιζόμενα πεδία (τα αριθμητικά υπολογίζονται πάντα από τα δεδομένα).
+const OBS_PERIOD_RE = /^\d{4}-\d{2}-[12]$/
+const OBS_FIELD_RE = /^[a-z0-9_]{1,40}$/
+
+// 15νθήμερο μιας ημερομηνίας 'YYYY-MM-DD' → 'YYYY-MM-1|2'.
+function obsPeriodOf(ymd) {
+  const m = /^(\d{4})-(\d{2})-(\d{2})/.exec(String(ymd || ''))
+  if (!m) return null
+  return `${m[1]}-${m[2]}-${Number(m[3]) <= 15 ? 1 : 2}`
+}
+
+function obsGet(period, field) {
+  const rows = db.query('SELECT value FROM observatory_values WHERE period=$p AND field=$f', { $p: period, $f: field })
+  return rows.length ? rows[0].value || '' : ''
+}
+
+function obsSet(period, field, value) {
+  db.run(
+    `INSERT INTO observatory_values (period, field, value, updated_at) VALUES ($p, $f, $v, $now)
+     ON CONFLICT(period, field) DO UPDATE SET value=excluded.value, updated_at=excluded.updated_at`,
+    { $p: period, $f: field, $v: value, $now: nowIso() }
+  )
+}
+
+ipcMain.handle('observatory:getValues', (_e, period) => {
+  if (!OBS_PERIOD_RE.test(String(period || ''))) return {}
+  const out = {}
+  for (const r of db.query('SELECT field, value FROM observatory_values WHERE period=$p', { $p: period }))
+    out[r.field] = r.value || ''
+  return out
+})
+
+ipcMain.handle('observatory:setValue', (_e, { period, field, value } = {}) => {
+  if (!OBS_PERIOD_RE.test(String(period || '')) || !OBS_FIELD_RE.test(String(field || '')))
+    return { error: 'Μη έγκυρο πεδίο Παρατηρητηρίου.' }
+  obsSet(period, field, String(value ?? ''))
+  return { ok: true }
+})
+
+// Αποστολή σημείωσης ημερολογίου σε πεδίο: προσθήκη «ημ/νία — τίτλος» + κείμενο στο πεδίο του
+// 15νθημέρου της ημερομηνίας της σημείωσης. Ίδιο μπλοκ δεύτερη φορά → δεν ξαναμπαίνει.
+ipcMain.handle('observatory:appendNote', (_e, { field, date, title, note } = {}) => {
+  const period = obsPeriodOf(date)
+  if (!period || !OBS_FIELD_RE.test(String(field || ''))) return { error: 'Μη έγκυρη σημείωση ή πεδίο.' }
+  const [, mm, dd] = String(date).split('-')
+  const head = `${Number(dd)}/${Number(mm)} — ${String(title || '').trim() || '(χωρίς τίτλο)'}`
+  const body = String(note || '').trim()
+  const block = body ? `${head}\n${body}` : head
+  const cur = obsGet(period, field)
+  if (cur.includes(block)) return { ok: true, period, already: true }
+  obsSet(period, field, cur.trim() ? `${cur.replace(/\s+$/, '')}\n\n${block}` : block)
+  return { ok: true, period }
+})
+
 ipcMain.handle('calendar:saveDocx', async (_e, { data, defaultName } = {}) => {
   if (!data) return { canceled: true }
   const { canceled, filePath } = await dialog.showSaveDialog({
@@ -1217,6 +1284,57 @@ ipcMain.handle('mail:setCalendarRules', (_e, rules = []) => {
 })
 
 ipcMain.handle('mail:runCalendarRules', async () => runCalendarRules())
+
+// ---- Σφάλματα renderer → insights -----------------------------------------
+// window.onerror / unhandledrejection / React ErrorBoundary του renderer.
+ipcMain.handle('telemetry:rendererError', (_e, payload = {}) => {
+  const err = {
+    name: String((payload && payload.name) || 'Error').slice(0, 80),
+    message: String((payload && payload.message) || ''),
+    stack: String((payload && payload.stack) || ''),
+  }
+  const where = 'renderer:' + String((payload && payload.source) || 'window').slice(0, 40)
+  log.error(where, err.message, err.stack)
+  telemetry.reportError({ where, err, kind: 'renderer' })
+  return { ok: true }
+})
+
+// ---- Επικοινωνία (ίδια φόρμα Web3Forms με τη σελίδα /contact) ---------------
+const WEB3FORMS_KEY = '202d5fe7-2cb5-4eda-ae99-451f3151875e' // public access key (ίδιο με τη σελίδα)
+const CONTACT_CATEGORIES = ['Πρόβλημα', 'Πρόταση', 'Ερώτηση']
+
+ipcMain.handle('contact:send', async (_e, { category, name, email, message } = {}) => {
+  const text = String(message || '').trim()
+  if (!text) return { error: 'Γράψε πρώτα το μήνυμα.' }
+  const cat = CONTACT_CATEGORIES.includes(category) ? category : 'Μήνυμα'
+  // Τα στοιχεία μηχανήματος μπαίνουν αυτόματα στο τέλος (για διάγνωση bugs).
+  const body = `${text}\n\n— — —\nΣτοιχεία μηχανήματος (αυτόματα):\n${telemetry.describeMachine()}`
+  try {
+    const res = await net.fetch('https://api.web3forms.com/submit', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
+      body: JSON.stringify({
+        access_key: WEB3FORMS_KEY,
+        subject: `[${cat}] Μήνυμα από την εφαρμογή Μαθητολόγιο ΣΕΠ v${app.getVersion()}`,
+        from_name: 'Εφαρμογή Μαθητολόγιο ΣΕΠ',
+        name: String(name || '').trim() || '(χωρίς όνομα)',
+        email: String(email || '').trim() || undefined,
+        message: body,
+        botcheck: '',
+      }),
+    })
+    let j = null
+    try {
+      j = await res.json()
+    } catch {
+      /* noop */
+    }
+    if (res.ok && j && j.success) return { ok: true }
+    return { error: `Η αποστολή απέτυχε${j && j.message ? ': ' + j.message : ` (HTTP ${res.status})`}.` }
+  } catch (err) {
+    return { error: 'Η αποστολή απέτυχε — έλεγξε τη σύνδεση στο internet.' }
+  }
+})
 
 // ---- Μαζικές ενέργειες ----------------------------------------------------
 
@@ -2003,8 +2121,6 @@ ipcMain.handle('backup:now', () => runAutoBackup({ force: true }))
 
 // ---- Αυτόματες ενημερώσεις (πειραματικό) ---------------------------------
 ipcMain.handle('update:check', () => updater.checkNow(true)) // χειροκίνητος έλεγχος
-ipcMain.handle('update:download', () => updater.startDownload()) // «Λήψη» σημαντικής
-ipcMain.handle('update:install', () => updater.installNow()) // «Επανεκκίνηση εφαρμογής» (major)
 ipcMain.handle('update:getState', () => updater.getState())
 
 ipcMain.handle('backup:list', () => {
@@ -2355,10 +2471,7 @@ app.whenReady().then(async () => {
   }
   // Αυτόματες ενημερώσεις (πειραματικό): έλεγχος στην εκκίνηση + περιοδικά.
   try {
-    updater.init(
-      () => mainWindow,
-      () => db.getAllSettings().update_auto !== 'off'
-    )
+    updater.init(() => mainWindow)
   } catch (e) {
     console.error('updater init', e)
   }
@@ -2369,6 +2482,17 @@ app.whenReady().then(async () => {
       getVersion: () => app.getVersion(),
       getLocale: () => app.getLocale(),
       getSchoolYear: () => db.getAllSettings().schoolYearStart || '',
+      getDataPath: () => app.getPath('userData'),
+      getScreen: () => {
+        const d = screen.getPrimaryDisplay()
+        return `${d.size.width}x${d.size.height} @${d.scaleFactor}x (οθόνες: ${screen.getAllDisplays().length})`
+      },
+      getLibreOffice: () => {
+        const p = documents.findSoffice(isDev ? null : process.resourcesPath, isDev)
+        if (!path.isAbsolute(p)) return 'δεν βρέθηκε'
+        if (!isDev && p.startsWith(process.resourcesPath)) return 'ενσωματωμένο'
+        return isDev && p.includes(path.join('resources', 'libreoffice')) ? 'ενσωματωμένο (dev)' : 'εγκατεστημένο στο σύστημα'
+      },
     })
   } catch (e) {
     console.error('telemetry init', e)

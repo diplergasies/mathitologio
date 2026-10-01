@@ -6,7 +6,8 @@
 // ΑΥΣΤΗΡΟΣ ΚΑΝΟΝΑΣ: εδώ ΔΕΝ φεύγει ΚΑΝΕΝΑ δεδομένο μαθητή/δομής, κανένα μέγεθος
 // (αριθμός μαθητών) ούτε γεωγραφία (Περιφέρεια). Στέλνονται μόνο: τυχαίο install_id,
 // έκδοση/OS, locale, σχολικό έτος, μοτίβα χρήσης (session/heartbeat), μετρητές
-// ενεργειών (allowlist) και ΚΑΘΑΡΙΣΜΕΝΑ σφάλματα (χωρίς διαδρομές χρήστη/IPC args).
+// ενεργειών (allowlist), ΤΕΧΝΙΚΑ στοιχεία μηχανήματος (CPU/RAM/δίσκος/οθόνη/εκδόσεις —
+// χωρίς όνομα υπολογιστή/χρήστη) και ΚΑΘΑΡΙΣΜΕΝΑ σφάλματα (χωρίς διαδρομές χρήστη/IPC args).
 //
 // Best-effort/σιωπηλό (μοτίβο announcement:get): fetch + timeout + try/catch που δεν
 // ρίχνει ποτέ. Ελέγχεται από (α) τοπικό opt-out (settings.telemetry_enabled==='0')
@@ -15,6 +16,7 @@
 
 const crypto = require('crypto')
 const os = require('os')
+const fs = require('fs')
 
 // ── Ρυθμίσεις backend — ΣΥΜΠΛΗΡΩΣΕ μετά το στήσιμο Firebase ────────────────────
 // (Το Web API key & το project id ΔΕΝ είναι μυστικά — είναι public web config.)
@@ -31,7 +33,7 @@ const STACK_TOP_FRAMES = 6
 const DEBUG = process.env.TELEMETRY_DEBUG === '1'
 
 // ── Κατάσταση συνεδρίας ───────────────────────────────────────────────────────
-let deps = null // { db, getVersion, getLocale, getSchoolYear }
+let deps = null // { db, getVersion, getLocale, getSchoolYear, getScreen, getLibreOffice, getDataPath }
 let installId = ''
 let firstSeen = ''
 let sessionId = ''
@@ -76,6 +78,11 @@ function toFields(obj) {
   const fields = {}
   for (const [k, v] of Object.entries(obj)) fields[k] = toValue(v)
   return { fields }
+}
+
+// Ανωνυμοποίηση διαδρομών φακέλου χρήστη μέσα σε ελεύθερο κείμενο (π.χ. μήνυμα ENOENT).
+function scrubPaths(text) {
+  return String(text || '').replace(/([A-Za-z]:\\Users\\|\/Users\/|\/home\/)[^\\/\s'"]+/gi, '$1<user>')
 }
 
 // Καθαρισμός stack: αφαίρεση απόλυτων διαδρομών χρήστη (π.χ. Windows username) και
@@ -159,6 +166,82 @@ function ensureInstallId() {
   }
 }
 
+// Ασφαλής κλήση: ό,τι κι αν συμβεί επιστρέφει fallback (η τηλεμετρία δεν ρίχνει ποτέ).
+function safe(fn, fallback = '') {
+  try {
+    const v = fn()
+    return v === undefined ? fallback : v
+  } catch {
+    return fallback
+  }
+}
+
+const MB = 1024 * 1024
+
+// Τεχνικά στοιχεία μηχανήματος για διάγνωση bugs. ΟΧΙ hostname/username/διαδρομές.
+// Τα σταθερά υπολογίζονται μία φορά· μνήμη/δίσκος/uptime σε κάθε κλήση (τρέχουσα εικόνα).
+let machineStatic = null
+function machineInfo() {
+  if (!machineStatic) {
+    const cpus = safe(() => os.cpus(), [])
+    machineStatic = {
+      os_version: safe(() => os.version()), // π.χ. «Windows 10 Home»
+      os_release: safe(() => os.release()), // π.χ. 10.0.19045
+      arch: process.arch,
+      cpu_model: safe(() => String((cpus[0] && cpus[0].model) || '').trim().slice(0, 120)),
+      cpu_cores: cpus.length || 0,
+      ram_total_mb: safe(() => Math.round(os.totalmem() / MB), 0),
+      electron: process.versions.electron || '',
+      chrome: process.versions.chrome || '',
+      node: process.versions.node || '',
+      libreoffice: safe(() => (deps && deps.getLibreOffice ? deps.getLibreOffice() : ''), ''),
+      screen: safe(() => (deps && deps.getScreen ? deps.getScreen() : ''), ''),
+      timezone: safe(() => Intl.DateTimeFormat().resolvedOptions().timeZone || ''),
+      locale: safe(() => (deps && deps.getLocale ? deps.getLocale() : '')),
+    }
+  }
+  let diskFreeMb = null
+  try {
+    const p = deps && deps.getDataPath ? deps.getDataPath() : ''
+    if (p && fs.statfsSync) {
+      const st = fs.statfsSync(p)
+      diskFreeMb = Math.round((Number(st.bavail) * Number(st.bsize)) / MB)
+    }
+  } catch {
+    /* noop */
+  }
+  return {
+    ...machineStatic,
+    ram_free_mb: safe(() => Math.round(os.freemem() / MB), 0),
+    disk_free_mb: diskFreeMb,
+    app_uptime_s: startedAt ? Math.round((Date.now() - startedAt) / 1000) : 0,
+  }
+}
+
+// Αναγνώσιμη περιγραφή μηχανήματος (για το μήνυμα της «Επικοινωνίας»).
+function describeMachine() {
+  const m = machineInfo()
+  let version = ''
+  try {
+    version = deps && deps.getVersion ? deps.getVersion() : ''
+  } catch {
+    /* noop */
+  }
+  const lines = [
+    `Έκδοση εφαρμογής: ${version}`,
+    `Λειτουργικό: ${m.os_version} (${m.os_release}, ${m.arch})`,
+    `CPU: ${m.cpu_model} · ${m.cpu_cores} πυρήνες`,
+    `RAM: ${m.ram_total_mb} MB (ελεύθερη ${m.ram_free_mb} MB)`,
+    `Ελεύθερος δίσκος: ${m.disk_free_mb == null ? '—' : m.disk_free_mb + ' MB'}`,
+    `Οθόνη: ${m.screen || '—'}`,
+    `LibreOffice: ${m.libreoffice || '—'}`,
+    `Electron ${m.electron} · Chrome ${m.chrome}`,
+    `Locale / ζώνη: ${m.locale || '—'} / ${m.timezone || '—'}`,
+    `install_id: ${installId || '—'}`,
+  ]
+  return lines.join('\n')
+}
+
 function baseFields() {
   let version = ''
   try {
@@ -202,6 +285,7 @@ async function sendSession() {
     locale,
     school_year: schoolYear,
     first_seen: firstSeen,
+    machine: machineInfo(),
   })
 }
 
@@ -231,12 +315,14 @@ function track(channel) {
 }
 
 // Αναφορά σφάλματος — καθαρισμένη, με dedup ανά συνεδρία ώστε να μη «πλημμυρίζει».
-function reportError({ where, err } = {}) {
+// kind: 'thrown' (εξαίρεση) | 'handled' (λειτουργία που επέστρεψε { error }) | 'renderer'.
+// Κάθε doc κουβαλά και τα στοιχεία μηχανήματος, ώστε να είναι αυτοτελές για διάγνωση.
+function reportError({ where, err, kind = 'thrown' } = {}) {
   try {
     if (optedOut() || !remote.enabled || !started) return
     const e = err || {}
     const name = String(e.name || 'Error').slice(0, 80)
-    const message = String(e.message || e || '').slice(0, MAX_MESSAGE_LEN)
+    const message = scrubPaths(String(e.message || e || '')).slice(0, MAX_MESSAGE_LEN)
     const stack = scrubStack(e.stack || '')
     const key = `${where}|${name}|${message}`
     if (errorsSeen.has(key)) return // ήδη σταλμένο αυτή τη συνεδρία
@@ -246,9 +332,11 @@ function reportError({ where, err } = {}) {
       ...baseFields(),
       at: new Date().toISOString(),
       where: String(where || 'unknown').slice(0, 80),
+      kind: String(kind).slice(0, 20),
       name,
       message,
       stack,
+      machine: machineInfo(),
     })
   } catch {
     /* noop */
@@ -295,4 +383,4 @@ async function flush() {
   }
 }
 
-module.exports = { init, track, reportError, flush }
+module.exports = { init, track, reportError, flush, describeMachine, machineInfo }

@@ -4,7 +4,7 @@ import Schools from './Schools'
 import PromotionModal from '../components/PromotionModal'
 import ResetDataModal from '../components/ResetDataModal'
 import { useConfirm } from '../components/ConfirmProvider'
-import { UserCog, Save, School, CalendarRange, GraduationCap, DatabaseBackup, FolderOpen, Play, FileText, FilePlus2, Trash2, AlertTriangle, Mail, RefreshCw, KeyRound, Search, HelpCircle, FolderArchive, Plus, CalendarPlus, BarChart3 } from 'lucide-react'
+import { UserCog, Save, School, CalendarRange, GraduationCap, DatabaseBackup, FolderOpen, Play, FileText, FilePlus2, Trash2, AlertTriangle, Mail, RefreshCw, KeyRound, Search, HelpCircle, FolderArchive, Plus, CalendarPlus, BarChart3, Database, Settings2 } from 'lucide-react'
 import { loadPackages, defaultPackages, SIGNER_LABELS } from '../lib/registrationPackages'
 
 // Βαθμίδες με σταθερό κλειδί `type` (ίδιο με το backend) και ετικέτα εμφάνισης.
@@ -1145,22 +1145,12 @@ function CalendarRulesSection() {
 
 // Ενότητα ενημερώσεων (πειραματικό): τρέχουσα έκδοση, διακόπτης αυτόματου ελέγχου, «Έλεγχος τώρα».
 function UpdateSection() {
-  const [auto, setAuto] = useState(true)
   const [msg, setMsg] = useState('')
-
-  useEffect(() => {
-    api.getSettings().then((s) => setAuto(!s || s.update_auto !== 'off'))
-  }, [])
-
-  async function toggleAuto(v) {
-    setAuto(v)
-    await api.setSettings({ update_auto: v ? 'on' : 'off' })
-  }
 
   async function checkNow() {
     setMsg('Έλεγχος…')
     await api.updateCheck()
-    setMsg('Έγινε έλεγχος. Αν υπάρχει σημαντική ενημέρωση θα εμφανιστεί ειδοποίηση.')
+    setMsg('Έγινε έλεγχος. Αν υπάρχει νέα έκδοση, κατεβαίνει στο παρασκήνιο και εφαρμόζεται στο κλείσιμο.')
     setTimeout(() => setMsg(''), 6000)
   }
 
@@ -1169,10 +1159,10 @@ function UpdateSection() {
       <h3 className="mb-3 flex items-center gap-2 font-semibold text-slate-700">
         <RefreshCw size={18} /> Ενημερώσεις
       </h3>
-      <label className="mb-3 flex items-center gap-2 text-sm text-slate-600">
-        <input type="checkbox" checked={auto} onChange={(e) => toggleAuto(e.target.checked)} />
-        Ειδοποίηση για σημαντικές ενημερώσεις
-      </label>
+      <p className="mb-3 text-sm text-slate-600">
+        Οι ενημερώσεις γίνονται αυτόματα: κάθε νέα έκδοση κατεβαίνει στο παρασκήνιο και εγκαθίσταται
+        όταν κλείσετε την εφαρμογή, η οποία ανοίγει ξανά μόνη της.
+      </p>
       <div className="flex items-center gap-3">
         <button
           onClick={checkNow}
@@ -1211,7 +1201,28 @@ function PrivacySection() {
   )
 }
 
-export default function Settings({ version, bump, emailCheck, onEmailConfigChange }) {
+// Υπο-tabs Ρυθμίσεων (οριζόντια μπάρα). Όλες οι ενότητες μένουν φορτωμένες και κρύβονται μόνο οι
+// ανενεργές, ώστε να μη χάνονται μη αποθηκευμένες αλλαγές όταν ο χρήστης αλλάζει υπο-tab.
+const SUB_TABS = [
+  { id: 'sep', label: 'ΣΕΠ & Σχολεία', icon: UserCog },
+  { id: 'email', label: 'E-mail', icon: Mail },
+  { id: 'docs', label: 'Έγγραφα', icon: FileText },
+  { id: 'data', label: 'Δεδομένα', icon: Database },
+  { id: 'system', label: 'Σύστημα', icon: Settings2 },
+]
+const SUB_TAB_KEY = 'settings.subTab'
+
+function loadSubTab() {
+  try {
+    const v = localStorage.getItem(SUB_TAB_KEY)
+    return SUB_TABS.some((t) => t.id === v) ? v : 'sep'
+  } catch {
+    return 'sep'
+  }
+}
+
+export default function Settings({ version, bump, emailCheck, onEmailConfigChange, initialSubTab }) {
+  const [sub, setSub] = useState(() => initialSubTab || loadSubTab())
   const [form, setForm] = useState({ sep: '', nomos: '', nomos_gen: '', domi: '', perif: '' })
   const [saved, setSaved] = useState(false)
 
@@ -1251,8 +1262,40 @@ export default function Settings({ version, bump, emailCheck, onEmailConfigChang
     </div>
   )
 
+  function chooseSub(id) {
+    setSub(id)
+    try {
+      localStorage.setItem(SUB_TAB_KEY, id)
+    } catch {
+      /* noop */
+    }
+  }
+
+  const pane = (id) => (sub === id ? 'space-y-6' : 'hidden')
+
   return (
     <div className="max-w-3xl space-y-6">
+      <div className="flex flex-wrap gap-1 border-b border-slate-200">
+        {SUB_TABS.map((t) => {
+          const Icon = t.icon
+          const active = sub === t.id
+          return (
+            <button
+              key={t.id}
+              onClick={() => chooseSub(t.id)}
+              className={`-mb-px inline-flex items-center gap-1.5 border-b-2 px-3 py-2 text-sm font-medium ${
+                active
+                  ? 'border-blue-600 text-blue-700'
+                  : 'border-transparent text-slate-500 hover:border-slate-300 hover:text-slate-700'
+              }`}
+            >
+              <Icon size={15} /> {t.label}
+            </button>
+          )
+        })}
+      </div>
+
+      <div className={pane('sep')}>
       <div className="rounded-lg border border-slate-200 bg-white p-4">
         <h3 className="mb-1 flex items-center gap-2 font-semibold text-slate-700">
           <UserCog size={18} /> Στοιχεία ΣΕΠ
@@ -1289,22 +1332,27 @@ export default function Settings({ version, bump, emailCheck, onEmailConfigChang
       </div>
 
       <SchoolYearSection bump={bump} />
+      </div>
 
-      <EmailImportSection emailCheck={emailCheck} onEmailConfigChange={onEmailConfigChange} />
+      <div className={pane('email')}>
+        <EmailImportSection emailCheck={emailCheck} onEmailConfigChange={onEmailConfigChange} />
+        <CalendarRulesSection />
+      </div>
 
-      <CalendarRulesSection />
+      <div className={pane('docs')}>
+        <TemplatesSection />
+        <PackagesSection />
+      </div>
 
-      <BackupSection />
+      <div className={pane('data')}>
+        <BackupSection />
+        <ResetSection bump={bump} />
+      </div>
 
-      <UpdateSection />
-
-      <TemplatesSection />
-
-      <PackagesSection />
-
-      <PrivacySection />
-
-      <ResetSection bump={bump} />
+      <div className={pane('system')}>
+        <UpdateSection />
+        <PrivacySection />
+      </div>
     </div>
   )
 }

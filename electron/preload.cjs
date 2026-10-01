@@ -91,10 +91,17 @@ contextBridge.exposeInMainWorld('api', {
   mailSetCalendarRules: (rules) => ipcRenderer.invoke('mail:setCalendarRules', rules),
   mailRunCalendarRules: () => ipcRenderer.invoke('mail:runCalendarRules'),
 
-  // Αυτόματες ενημερώσεις (πειραματικό).
+  // Παρατηρητήριο: αποθηκευμένα κείμενα πεδίων ανά 15νθήμερο + αποστολή σημείωσης.
+  observatoryGetValues: (period) => ipcRenderer.invoke('observatory:getValues', period),
+  observatorySetValue: (payload) => ipcRenderer.invoke('observatory:setValue', payload),
+  observatoryAppendNote: (payload) => ipcRenderer.invoke('observatory:appendNote', payload),
+
+  // Επικοινωνία & αναφορά σφαλμάτων renderer.
+  contactSend: (payload) => ipcRenderer.invoke('contact:send', payload),
+  reportRendererError: (payload) => ipcRenderer.invoke('telemetry:rendererError', payload),
+
+  // Αυτόματες ενημερώσεις (μόνο σιωπηλές, εγκατάσταση στο κλείσιμο).
   updateCheck: () => ipcRenderer.invoke('update:check'),
-  updateDownload: () => ipcRenderer.invoke('update:download'),
-  updateInstall: () => ipcRenderer.invoke('update:install'),
   updateGetState: () => ipcRenderer.invoke('update:getState'),
   onUpdateStatus: (cb) => {
     const h = (_e, data) => cb(data)

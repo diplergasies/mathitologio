@@ -7,6 +7,7 @@ import Settings from './tabs/Settings'
 import Report from './tabs/Report'
 import Observatory from './tabs/Observatory'
 import Calendar from './tabs/Calendar'
+import Contact from './tabs/Contact'
 import HelpModal from './components/HelpModal'
 import DepartureDetectionModal from './components/DepartureDetectionModal'
 import RoomChangesModal from './components/RoomChangesModal'
@@ -14,7 +15,7 @@ import EmailPromptModal from './components/EmailPromptModal'
 import AnnouncementModal from './components/AnnouncementModal'
 import UpdateBanner from './components/UpdateBanner'
 import { useConfirm } from './components/ConfirmProvider'
-import { Upload, FileText, Download, Database, PlaneLanding, Users, Trash2, Settings as SettingsIcon, BarChart3, ClipboardList, CalendarDays, BookOpen, HelpCircle } from 'lucide-react'
+import { Upload, FileText, Download, Database, PlaneLanding, Users, Trash2, Settings as SettingsIcon, BarChart3, ClipboardList, CalendarDays, BookOpen, HelpCircle, MessageSquare } from 'lucide-react'
 
 // Ορατή στον χρήστη έκδοση = μόνο major.minor (π.χ. «1.6»). Οι σιωπηλές ενημερώσεις αυξάνουν
 // μόνο το 3ο ψηφίο, ώστε ο χρήστης να ΜΗ βλέπει αλλαγή· η πλήρης έκδοση μένει στις Ρυθμίσεις.
@@ -28,6 +29,7 @@ const TABS = [
   { id: 'settings', label: 'Ρυθμίσεις', icon: SettingsIcon, Comp: Settings },
   { id: 'report', label: 'Αποτύπωση', icon: BarChart3, Comp: Report },
   { id: 'observatory', label: 'Παρατηρητήριο', icon: ClipboardList, Comp: Observatory },
+  { id: 'contact', label: 'Επικοινωνία', icon: MessageSquare, Comp: Contact },
 ]
 
 export default function App() {
@@ -49,13 +51,17 @@ export default function App() {
   const updateDismissedRef = useRef(null) // έκδοση που ο χρήστης απέκρυψε (να μη ξαναενοχλεί)
   const [announcement, setAnnouncement] = useState(null) // { id, message } — μήνυμα προς χρήστες
 
+  const [settingsSub, setSettingsSub] = useState(null) // αρχικό υπο-tab Ρυθμίσεων (π.χ. 1η εκκίνηση)
   const bump = () => setVersion((v) => v + 1)
 
   useEffect(() => {
     api.appInfo().then((i) => {
       setInfo(i)
       // Πρώτη εκκίνηση: άνοιγμα Ρυθμίσεων ώστε ο χρήστης να ορίσει στοιχεία & σχολεία.
-      if (i && i.firstRun) setTab('settings')
+      if (i && i.firstRun) {
+        setSettingsSub('sep')
+        setTab('settings')
+      }
     })
   }, [])
 
@@ -81,9 +87,7 @@ export default function App() {
     setUpdateState(st)
   }
   useEffect(() => {
-    // Η απόκρυψη του banner είναι πλέον ΜΟΝΟ για την τρέχουσα συνεδρία (δεν διαβάζουμε
-    // αποθηκευμένη έκδοση): στο επόμενο άνοιγμα το startup check ξαναβρίσκει τη σημαντική
-    // ενημέρωση και το banner επανεμφανίζεται μέχρι ο χρήστης να πατήσει «Λήψη».
+    // Η απόκρυψη του banner ισχύει μόνο για την τρέχουσα συνεδρία (δεν αποθηκεύεται).
     api.updateGetState().then((st) => {
       if (st && st.state !== 'idle') applyUpdate(st)
     })
@@ -269,13 +273,8 @@ export default function App() {
 
   return (
     <div className="flex h-full flex-col">
-      {updateState && (updateState.importance === 'major' || updateState.state === 'silent-ready') && (
-        <UpdateBanner
-          state={updateState}
-          onDownload={() => api.updateDownload()}
-          onInstall={() => api.updateInstall()}
-          onDismiss={dismissUpdate}
-        />
+      {updateState && updateState.state === 'silent-ready' && (
+        <UpdateBanner state={updateState} onDismiss={dismissUpdate} />
       )}
       <header className="flex items-center justify-between border-b border-slate-200 bg-white px-5 py-3">
         <div className="flex items-center gap-2">
@@ -354,6 +353,7 @@ export default function App() {
             showToast={showToast}
             emailCheck={() => checkEmail({ manual: true })}
             onEmailConfigChange={() => setEmailTick((t) => t + 1)}
+            initialSubTab={settingsSub}
           />
         )}
       </main>

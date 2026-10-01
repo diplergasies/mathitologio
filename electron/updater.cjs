@@ -1,12 +1,10 @@
 'use strict'
 
 // ---------------------------------------------------------------------------
-// Αυτόματες ενημερώσεις (2 επιπέδων) — ΜΟΝΟ πειραματική έκδοση.
+// Αυτόματες ενημερώσεις — ΜΟΝΟ σιωπηλές.
 //
-//  • Σημαντικές (release body περιέχει [major]): στέλνει «available» στο renderer →
-//    καρφιτσωμένο banner με «Λήψη». Μετά τη λήψη γίνεται αυτόματη επανεκκίνηση.
-//  • Μικρές (body [silent] ή χωρίς ετικέτα = προεπιλογή): κατεβαίνουν & εγκαθίστανται
-//    σιωπηλά στο παρασκήνιο, εφαρμόζονται στο επόμενο κλείσιμο (autoInstallOnAppQuit).
+// Κάθε νέο release κατεβαίνει αυτόματα στο παρασκήνιο και εγκαθίσταται (με επανεκκίνηση) όταν
+// ο χρήστης κλείσει την εφαρμογή. Δεν υπάρχει πια κουμπί «Λήψη» / σημαντικές ενημερώσεις.
 //
 // Το repo είναι ΔΗΜΟΣΙΟ: τα releases διαβάζονται χωρίς token (δεν ενσωματώνεται μυστικό στην
 // εφαρμογή). Σε dev ο updater μένει ανενεργός.
@@ -32,14 +30,11 @@ const isDev = !!process.env.VITE_DEV_SERVER_URL
 
 const OWNER = 'diplergasies'
 const REPO = 'mathitologio'
-const DEFAULT_SEVERITY = 'silent' // χωρίς ρητή ετικέτα [major]/[silent] → σιωπηλή
 const CHECK_INTERVAL_MS = 6 * 60 * 60 * 1000 // ~6 ώρες
 
 let getWin = () => null
-let isEnabled = () => true
 let started = false
-let silentDownloading = false // αποφυγή διπλού download για σιωπηλή ενημέρωση
-let majorFlow = false // true μόνο αφού ο χρήστης πατήσει «Λήψη» σε σημαντική ενημέρωση
+let silentDownloading = false // αποφυγή διπλού download
 let silentReady = false // σιωπηλή ενημέρωση κατεβασμένη, εκκρεμεί install+relaunch στο κλείσιμο
 let installing = false // αποτροπή διπλού quitAndInstall / re-entrancy στο before-quit
 let lastState = { state: 'idle' } // τελευταία κατάσταση (για update:getState μετά από navigation)
@@ -59,60 +54,26 @@ function notify(title, body) {
   }
 }
 
-// Διαβάζει τη σοβαρότητα από το σώμα (body) του πιο πρόσφατου release: [major] | [silent].
-// Public repo → χωρίς Authorization header.
-async function resolveSeverity() {
-  try {
-    const res = await fetch(
-      `https://api.github.com/repos/${OWNER}/${REPO}/releases/latest`,
-      {
-        headers: {
-          Accept: 'application/vnd.github+json',
-          'User-Agent': 'mathitologio-updater',
-        },
-      }
-    )
-    if (!res.ok) return DEFAULT_SEVERITY
-    const json = await res.json()
-    const body = (json && json.body) || ''
-    if (/\[major\]/i.test(body)) return 'major'
-    if (/\[silent\]/i.test(body)) return 'silent'
-    return DEFAULT_SEVERITY
-  } catch (_e) {
-    return DEFAULT_SEVERITY
-  }
-}
-
 function wire() {
   autoUpdater.on('checking-for-update', () => log.info('updater: έλεγχος για ενημέρωση…'))
   autoUpdater.on('update-not-available', (info) =>
     log.info('updater: καμία ενημέρωση (τρέχουσα =', info && info.version, ')')
   )
 
-  autoUpdater.on('update-available', async (info) => {
+  autoUpdater.on('update-available', (info) => {
     log.info('updater: βρέθηκε έκδοση', info && info.version)
-    // Αν έχει ήδη ξεκινήσει λήψη (σημαντική ή σιωπηλή), αγνόησε επαναλαμβανόμενες ειδοποιήσεις
-    // από τους περιοδικούς ελέγχους — αλλιώς θα «επανερχόταν» το banner ενώ κατεβαίνει.
-    if (majorFlow || silentDownloading) {
+    // Αν έχει ήδη ξεκινήσει λήψη, αγνόησε επαναλαμβανόμενες ειδοποιήσεις των περιοδικών ελέγχων.
+    if (silentDownloading) {
       log.info('updater: λήψη ήδη σε εξέλιξη — αγνοώ')
       return
     }
-    const severity = await resolveSeverity()
-    log.info('updater: σοβαρότητα =', severity)
-    if (severity === 'major') {
-      majorFlow = false // παραμένει false μέχρι το «Λήψη» — δεν κατεβάζουμε ακόμη
-      // Το banner εμφανίζεται ΜΟΝΟ αν ο χρήστης δεν έχει σιγήσει τις ειδοποιήσεις σημαντικών.
-      if (isEnabled()) {
-        send({ state: 'available', importance: 'major', version: info.version })
-      } else {
-        log.info('updater: σημαντική ενημέρωση διαθέσιμη αλλά οι ειδοποιήσεις είναι OFF — σιωπή')
-      }
-    } else if (!silentDownloading) {
-      // Σιωπηλή: κατέβασε στο παρασκήνιο· η εγκατάσταση γίνεται στο κλείσιμο.
-      silentDownloading = true
-      log.info('updater: σιωπηλή λήψη ξεκίνησε στο παρασκήνιο')
-      autoUpdater.downloadUpdate().catch((e) => log.error('updater: silent download', e))
-    }
+    // Κατέβασε στο παρασκήνιο· η εγκατάσταση γίνεται στο κλείσιμο.
+    silentDownloading = true
+    log.info('updater: σιωπηλή λήψη ξεκίνησε στο παρασκήνιο')
+    autoUpdater.downloadUpdate().catch((e) => {
+      silentDownloading = false // να ξαναδοκιμάσει στον επόμενο έλεγχο
+      log.error('updater: silent download', e)
+    })
   })
 
   autoUpdater.on('download-progress', (p) => {
@@ -123,29 +84,19 @@ function wire() {
         p.total / 1048576
       ).toFixed(1)} MB @ ${((p.bytesPerSecond || 0) / 1048576).toFixed(2)} MB/s`
     )
-    if (majorFlow) {
-      send({ state: 'downloading', importance: 'major', percent: Math.round(p.percent || 0) })
-    }
   })
 
   autoUpdater.on('update-downloaded', (info) => {
-    log.info('updater: η λήψη ολοκληρώθηκε —', info && info.version, majorFlow ? '(major)' : '(silent)')
-    if (majorFlow) {
-      // MAJOR: ΔΕΝ γίνεται αυτόματη επανεκκίνηση. Το banner εμφανίζει κουμπί «Επανεκκίνηση
-      // εφαρμογής» — ο χρήστης αποφασίζει πότε (αποφυγή race «ffmpeg.dll» από πρόωρο άνοιγμα).
-      log.info('updater: major — αναμονή για το κουμπί «Επανεκκίνηση εφαρμογής»')
-      send({ state: 'downloaded', importance: 'major', version: info.version })
-    } else {
-      // SILENT: θα εγκατασταθεί ΚΑΙ θα επανεκκινήσει στο κλείσιμο (βλ. before-quit hook), ώστε ο
-      // χρήστης να μη χρειάζεται να την ανοίξει χειροκίνητα μέσα στο παράθυρο εγκατάστασης.
-      silentReady = true
-      log.info('updater: σιωπηλή έτοιμη — install+relaunch στο κλείσιμο')
-      send({ state: 'silent-ready', importance: 'silent', version: info.version })
-      notify(
-        'Ενημέρωση Μαθητολογίου έτοιμη',
-        'Θα εφαρμοστεί όταν κλείσετε την εφαρμογή και θα ανοίξει ξανά μόνη της. Μετά το κλείσιμο μην την ανοίξετε εσείς — περιμένετε λίγο.'
-      )
-    }
+    log.info('updater: η λήψη ολοκληρώθηκε —', info && info.version)
+    // Θα εγκατασταθεί ΚΑΙ θα επανεκκινήσει στο κλείσιμο (βλ. before-quit hook), ώστε ο χρήστης
+    // να μη χρειάζεται να την ανοίξει χειροκίνητα μέσα στο παράθυρο εγκατάστασης.
+    silentReady = true
+    log.info('updater: σιωπηλή έτοιμη — install+relaunch στο κλείσιμο')
+    send({ state: 'silent-ready', importance: 'silent', version: info.version })
+    notify(
+      'Ενημέρωση Μαθητολογίου έτοιμη',
+      'Θα εφαρμοστεί όταν κλείσετε την εφαρμογή και θα ανοίξει ξανά μόνη της. Μετά το κλείσιμο μην την ανοίξετε εσείς — περιμένετε λίγο.'
+    )
   })
 
   autoUpdater.on('error', (err) => {
@@ -153,9 +104,8 @@ function wire() {
   })
 }
 
-function init(winGetter, enabledGetter) {
+function init(winGetter) {
   getWin = typeof winGetter === 'function' ? winGetter : () => null
-  isEnabled = typeof enabledGetter === 'function' ? enabledGetter : () => true
 
   if (isDev) {
     log.info('updater: παράλειψη (dev)')
@@ -206,10 +156,7 @@ function init(winGetter, enabledGetter) {
   setInterval(() => checkNow(false), CHECK_INTERVAL_MS)
 }
 
-// force=true → χειροκίνητος έλεγχος (αγνοεί τον διακόπτη «Αυτόματες ενημερώσεις»).
-// Ο έλεγχος τρέχει ΠΑΝΤΑ (ακόμη κι αν ο διακόπτης είναι off) — έτσι οι σιωπηλές
-// ενημερώσεις εφαρμόζονται πάντα. Ο διακόπτης αφορά ΜΟΝΟ την ειδοποίηση (banner) για
-// σημαντικές ενημερώσεις (βλ. update-available).
+// force=true → χειροκίνητος έλεγχος από τις Ρυθμίσεις (μόνο για το log).
 function checkNow(force) {
   if (!started) {
     log.info('updater: checkNow αλλά ο updater δεν είναι ενεργός')
@@ -219,31 +166,8 @@ function checkNow(force) {
   autoUpdater.checkForUpdates().catch((e) => log.error('updater: checkForUpdates', e))
 }
 
-// Ενεργοποιείται από το «Λήψη» του banner (μόνο σημαντικές ενημερώσεις).
-function startDownload() {
-  if (!started) return
-  majorFlow = true
-  log.info('updater: ο χρήστης πάτησε «Λήψη» — ξεκινά λήψη σημαντικής ενημέρωσης')
-  send({ state: 'downloading', importance: 'major', percent: 0 })
-  autoUpdater.downloadUpdate().catch((e) => log.error('updater: startDownload', e))
-}
-
-// Ενεργοποιείται από το κουμπί «Επανεκκίνηση εφαρμογής» (σημαντική ενημέρωση, αφού κατέβει).
-// Εγκατάσταση + επανεκκίνηση, ελεγχόμενα από τον χρήστη (όχι αυτόματα).
-function installNow() {
-  if (!started || installing) return
-  installing = true
-  log.info('updater: ο χρήστης πάτησε «Επανεκκίνηση εφαρμογής» — εγκατάσταση + επανεκκίνηση')
-  try {
-    autoUpdater.quitAndInstall(true, true) // σιωπηλή εγκατάσταση + επανεκκίνηση
-  } catch (e) {
-    log.error('updater: quitAndInstall (major)', e)
-    installing = false
-  }
-}
-
 function getState() {
   return lastState
 }
 
-module.exports = { init, checkNow, startDownload, installNow, getState }
+module.exports = { init, checkNow, getState }

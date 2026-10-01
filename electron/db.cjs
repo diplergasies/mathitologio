@@ -46,6 +46,15 @@ CREATE TABLE IF NOT EXISTS calendar_notes (
   updated_at TEXT
 );
 
+-- Παρατηρητήριο: κείμενα των ΜΗ υπολογιζόμενων πεδίων ανά 15νθήμερο (period = YYYY-MM-1|2).
+CREATE TABLE IF NOT EXISTS observatory_values (
+  period TEXT NOT NULL,
+  field TEXT NOT NULL,
+  value TEXT,
+  updated_at TEXT,
+  PRIMARY KEY (period, field)
+);
+
 CREATE TABLE IF NOT EXISTS students (
   id INTEGER PRIMARY KEY AUTOINCREMENT,
   batch_id INTEGER,
