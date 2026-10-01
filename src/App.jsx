@@ -44,6 +44,7 @@ export default function App() {
   const [emailTick, setEmailTick] = useState(0) // αλλαγές ρυθμίσεων e-mail → επαναρύθμιση poller
   const emailTimerRef = useRef(null)
   const handledUidRef = useRef(null) // uid που ήδη εισήχθη ή απορρίφθηκε (να μη ξαναρωτά)
+  const calFailRef = useRef(0) // συνεχόμενες αποτυχίες αυτόματου ελέγχου κανόνων ημερολογίου
   const [updateState, setUpdateState] = useState(null) // { state, importance, version, percent }
   const updateDismissedRef = useRef(null) // έκδοση που ο χρήστης απέκρυψε (να μη ξαναενοχλεί)
   const [announcement, setAnnouncement] = useState(null) // { id, message } — μήνυμα προς χρήστες
@@ -185,9 +186,18 @@ export default function App() {
     const res = await api.mailRunCalendarRules()
     if (!res) return
     if (res.error) {
+      if (res.added > 0) {
+        showToast(`Προστέθηκαν ${res.added} σημειώσεις ημερολογίου από e-mail.`)
+        bump()
+      }
+      // Στον αυτόματο έλεγχο ειδοποίηση μία φορά, μετά από 2 συνεχόμενες αποτυχίες.
+      calFailRef.current += 1
       if (manual) showToast(res.error, 'error')
+      else if (calFailRef.current === 2)
+        showToast(`Ο έλεγχος e-mail για το Ημερολόγιο απέτυχε: ${res.error}`, 'warn')
       return
     }
+    calFailRef.current = 0
     if (res.added > 0) {
       showToast(`Προστέθηκαν ${res.added} σημειώσεις ημερολογίου από e-mail.`)
       bump() // ανανέωση ανοιχτού Ημερολογίου
@@ -208,14 +218,14 @@ export default function App() {
       if (cancelled || !cfg) return
       const configured = cfg.username && cfg.hasPassword
       if (!configured || cfg.autoFreq === 'off') return
-      checkEmail({ manual: false })
-      runCalendarRules({ manual: false })
+      // Σειριακά (όχι ταυτόχρονες συνδέσεις IMAP): πρώτα λίστα, μετά κανόνες ημερολογίου.
+      const tick = async () => {
+        try { await checkEmail({ manual: false }) } catch {}
+        try { await runCalendarRules({ manual: false }) } catch {}
+      }
+      tick()
       const ms = FREQ_MS[cfg.autoFreq]
-      if (ms)
-        emailTimerRef.current = setInterval(() => {
-          checkEmail({ manual: false })
-          runCalendarRules({ manual: false })
-        }, ms)
+      if (ms) emailTimerRef.current = setInterval(tick, ms)
     })
     return () => {
       cancelled = true

@@ -54,17 +54,35 @@ function daysAgo(n) {
 }
 
 function makeClient(config) {
-  return new ImapFlow({
+  const client = new ImapFlow({
     host: config.host || 'mail.sch.gr',
     port: Number(config.port) || 993,
     secure: true,
     auth: { user: config.username, pass: config.password },
     logger: false,
-    // Ανθεκτικότητα σε αργά/ιδιόμορφα servers.
-    socketTimeout: 60 * 1000,
+    // Ανθεκτικότητα σε αργά/ιδιόμορφα servers (το sch.gr καθυστερεί κατά διαστήματα).
+    socketTimeout: 5 * 60 * 1000,
     greetingTimeout: 20 * 1000,
     connectionTimeout: 20 * 1000,
   })
+  // Χωρίς listener, ένα 'error' (π.χ. Socket timeout) γίνεται uncaughtException. Οι εκκρεμείς
+  // εντολές απορρίπτονται ούτως ή άλλως· ο έλεγχος γίνεται μέσω connectionLost().
+  client.on('error', () => {})
+  return client
+}
+
+// Η σύνδεση κόπηκε (timeout/αποσύνδεση) — όλα τα επόμενα βήματα θα αποτύχουν.
+function connectionLost(client) {
+  return !client.usable
+}
+
+// Επιλέξιμοι φάκελοι προς σάρωση: INBOX πρώτα, μετά οι υπόλοιποι.
+async function listSelectable(client) {
+  const boxes = (await client.list()).filter(
+    (box) => !(box.flags && (box.flags.has ? box.flags.has('\\Noselect') : false))
+  )
+  const isInbox = (b) => String(b.path).toUpperCase() === 'INBOX'
+  return [...boxes.filter(isInbox), ...boxes.filter((b) => !isInbox(b))]
 }
 
 // Απλός έλεγχος σύνδεσης/ταυτότητας.
@@ -133,18 +151,17 @@ async function findLatestInOpen(client, cfg) {
 // Επιστρέφει { mailbox, uid, date, subject, from, envScore } ή null.
 async function findLatestAllFolders(client, cfg) {
   let best = null // { mailbox, uid, date, subject, from, envScore, t }
-  const boxes = await client.list()
+  const boxes = await listSelectable(client)
   for (const box of boxes) {
-    // Παράλειψη μη-επιλέξιμων φακέλων (π.χ. containers).
-    if (box.flags && (box.flags.has ? box.flags.has('\\Noselect') : false)) continue
     let lock = null
     try {
       lock = await client.getMailboxLock(box.path)
       const hit = await findLatestInOpen(client, cfg)
       if (hit && (!best || hit.envScore > best.envScore || (hit.envScore === best.envScore && hit.t > best.t)))
         best = { mailbox: box.path, ...hit }
-    } catch {
-      // Αγνόησε φακέλους που δεν ανοίγουν και συνέχισε στους υπόλοιπους.
+    } catch (err) {
+      // Κομμένη σύνδεση → σφάλμα (όχι σιωπηλό «δεν βρέθηκε»). Αλλιώς αγνόησε τον φάκελο.
+      if (connectionLost(client)) throw err
     } finally {
       if (lock) try { lock.release() } catch {}
     }
@@ -270,10 +287,14 @@ function ruleMatches(env, rule) {
   return true
 }
 
-// Σάρωση όλων των φακέλων για μηνύματα που ταιριάζουν στους κανόνες (τελευταίες searchDays ημέρες).
+// Σάρωση όλων των φακέλων (INBOX πρώτα) για μηνύματα που ταιριάζουν στους κανόνες (τελευταίες
+// searchDays ημέρες). Ο αποστολέας αναζητείται στον server (IMAP FROM: substring, χωρίς διάκριση
+// πεζών/κεφαλαίων), ώστε να μην κατεβαίνουν οι envelopes όλων των μηνυμάτων· το τελικό ταίριασμα
+// (π.χ. θέμα με τόνους) γίνεται τοπικά με ruleMatches μόνο στα ευρήματα.
 // Παραλείπει μηνύματα με Message-ID που υπάρχει ήδη στο knownIds (Set) — φθηνό, χωρίς λήψη σώματος.
 // Για τα ταιριάσματα κατεβάζει το σώμα (text/plain ή fallback από HTML).
-// Επιστρέφει { ok, matches: [{ messageId, date, subject, body, ruleId }] } ή { error }.
+// Επιστρέφει { ok, matches: [{ messageId, date, subject, body, ruleId }] } ή, αν κοπεί η σύνδεση,
+// { error, matches } με όσα είχαν ήδη συλλεχθεί (ώστε να εισαχθούν).
 // ΜΟΝΟ ανάγνωση.
 async function fetchCalendarMatches(config, rules, knownIds) {
   const cfg = withDefaults(config)
@@ -284,17 +305,21 @@ async function fetchCalendarMatches(config, rules, knownIds) {
   const matches = []
   try {
     await client.connect()
-    const boxes = await client.list()
+    const boxes = await listSelectable(client)
     for (const box of boxes) {
-      if (box.flags && (box.flags.has ? box.flags.has('\\Noselect') : false)) continue
       let lock = null
       try {
         lock = await client.getMailboxLock(box.path)
-        const uids = await client.search({ since: daysAgo(cfg.searchDays) }, { uid: true })
-        if (!uids || !uids.length) continue
-        // 1ο πέρασμα (φθηνό): βρες υποψήφια uids που ταιριάζουν σε κανόνα & δεν είναι γνωστά.
+        const since = daysAgo(cfg.searchDays)
+        const uidSet = new Set()
+        for (const rule of activeRules) {
+          const uids = await client.search({ since, from: String(rule.senderMatch).trim() }, { uid: true })
+          for (const u of uids || []) uidSet.add(u)
+        }
+        if (!uidSet.size) continue
+        // 1ο πέρασμα (φθηνό): envelopes μόνο των ευρημάτων → ταίριασμα κανόνα & dedup.
         const candidates = [] // { uid, messageId, date, subject, ruleId }
-        for await (const msg of client.fetch({ uid: uids }, { uid: true, envelope: true, internalDate: true })) {
+        for await (const msg of client.fetch({ uid: [...uidSet] }, { uid: true, envelope: true, internalDate: true })) {
           const env = msg.envelope || {}
           const messageId = (env.messageId || '').trim()
           if (messageId && known.has(messageId)) continue
@@ -317,20 +342,22 @@ async function fetchCalendarMatches(config, rules, knownIds) {
               const parsed = await simpleParser(full.source)
               body = (parsed.text && parsed.text.trim()) || htmlToText(parsed.html) || ''
             }
-          } catch {
-            // αγνόησε — σημείωση χωρίς σώμα
+          } catch (err) {
+            if (connectionLost(client)) throw err
+            // αλλιώς: σημείωση χωρίς σώμα
           }
           matches.push({ messageId: c.messageId, date: c.date, subject: c.subject, body, ruleId: c.ruleId })
         }
-      } catch {
-        // αγνόησε φακέλους που δεν ανοίγουν
+      } catch (err) {
+        // Κομμένη σύνδεση → διακοπή με σφάλμα· αλλιώς αγνόησε τον φάκελο (π.χ. δεν ανοίγει).
+        if (connectionLost(client)) throw err
       } finally {
         if (lock) try { lock.release() } catch {}
       }
     }
     return { ok: true, matches }
   } catch (err) {
-    return { error: friendly(err) }
+    return { error: friendly(err), matches }
   } finally {
     try { await client.logout() } catch { try { client.close() } catch {} }
   }

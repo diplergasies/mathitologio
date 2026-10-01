@@ -1007,6 +1007,15 @@ function sanitizeName(n) {
 // Προσωρινή μνήμη τελευταίου κατεβασμένου συνημμένου (για να μη ξανακατεβαίνει στο import).
 let mailCache = null // { mailbox, uid, filename, content }
 
+// Σειριοποίηση συνδέσεων IMAP: ποτέ δύο ταυτόχρονες συνεδρίες (ο poller ελέγχει λίστα & κανόνες
+// ημερολογίου μαζί — ταυτόχρονες συνδέσεις στο sch.gr κατέληγαν σε Socket timeout).
+let imapChain = Promise.resolve()
+function withImap(fn) {
+  const run = imapChain.then(fn, fn)
+  imapChain = run.catch(() => {})
+  return run
+}
+
 ipcMain.handle('mail:getConfig', () => {
   const s = db.getAllSettings()
   return {
@@ -1055,7 +1064,7 @@ ipcMain.handle('mail:test', async () => {
   const cfg = getMailConfig()
   if (!cfg.username || !cfg.password)
     return { error: 'Συμπλήρωσε όνομα χρήστη και κωδικό πρώτα.' }
-  return mail.testConnection(cfg)
+  return withImap(() => mail.testConnection(cfg))
 })
 
 // Έλεγχος για νέα λίστα: εντοπίζει την πιο πρόσφατη και συγκρίνει το όνομα του συνημμένου
@@ -1064,7 +1073,7 @@ ipcMain.handle('mail:check', async () => {
   const cfg = getMailConfig()
   if (!cfg.username || !cfg.password) return { ok: true, configured: false }
   const known = mailCache ? { mailbox: mailCache.mailbox, uid: mailCache.uid } : null
-  const r = await mail.checkLatest(cfg, known)
+  const r = await withImap(() => mail.checkLatest(cfg, known))
   if (r.error) return { error: r.error }
   if (!r.found) return { ok: true, configured: true, found: false, noAttachment: !!r.noAttachment }
   // unchanged → επαναχρησιμοποίηση του ήδη κατεβασμένου συνημμένου (χωρίς νέα λήψη).
@@ -1108,7 +1117,7 @@ ipcMain.handle('mail:import', async (_e, id = {}) => {
   if (!att) {
     const cfg = getMailConfig()
     if (!cfg.username || !cfg.password) return { error: 'Δεν υπάρχουν στοιχεία σύνδεσης.' }
-    const r = await mail.downloadByUid(cfg, mailbox, uid)
+    const r = await withImap(() => mail.downloadByUid(cfg, mailbox, uid))
     if (r.error) return { error: r.error }
     att = { mailbox, uid, filename: r.filename, content: r.content, messageId: r.messageId || '', date: r.date || null }
   }
@@ -1166,11 +1175,20 @@ async function runCalendarRules() {
     "SELECT source_message_id FROM calendar_notes WHERE source_message_id IS NOT NULL AND source_message_id <> ''"
   )
   const known = new Set(knownRows.map((r) => String(r.source_message_id)))
-  const r = await mail.fetchCalendarMatches(cfg, rules, known)
-  if (r.error) return { error: r.error }
+  // Μία επανάληψη σε σφάλμα (συνήθως κομμένη σύνδεση/timeout του server). Τα ευρήματα πριν το
+  // σφάλμα κρατιούνται ώστε να εισαχθούν ούτως ή άλλως.
+  let r = await withImap(() => mail.fetchCalendarMatches(cfg, rules, known))
+  let found = r.matches || []
+  if (r.error) {
+    log.warn('calendar rules: αποτυχία σάρωσης, επανάληψη —', r.error)
+    const retry = await withImap(() => mail.fetchCalendarMatches(cfg, rules, known))
+    found = found.concat(retry.matches || [])
+    r = retry
+    if (r.error) log.warn('calendar rules: αποτυχία και στην επανάληψη —', r.error)
+  }
   let added = 0
   const now = nowIso()
-  for (const m of r.matches || []) {
+  for (const m of found) {
     // Ασφάλεια: αν λείπει Message-ID δεν μπορούμε να κάνουμε dedup — παραλείπουμε (αποφυγή διπλών).
     if (!m.messageId || known.has(m.messageId)) continue
     db.run(
@@ -1187,6 +1205,7 @@ async function runCalendarRules() {
     known.add(m.messageId)
     added++
   }
+  if (r.error) return { error: r.error, added }
   return { ok: true, configured: true, added }
 }
 
