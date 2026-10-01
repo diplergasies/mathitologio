@@ -38,8 +38,7 @@ export default function Contact() {
           <MessageSquare size={18} /> Επικοινωνία
         </h3>
         <p className="mb-4 text-sm text-slate-500">
-          Στείλτε προτάσεις, σχόλια, ερωτήσεις ή προβλήματα που εντοπίσατε. Το μήνυμα φτάνει απευθείας
-          στον δημιουργό της εφαρμογής.
+          Στείλτε προτάσεις, σχόλια, ερωτήσεις ή προβλήματα που εντοπίσατε.
         </p>
 
         <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
