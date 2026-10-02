@@ -101,11 +101,16 @@ async function testConnection(config) {
 // Μήνυμα σφάλματος φιλικό προς τον χρήστη.
 function friendly(err) {
   const m = (err && err.message ? err.message : String(err)) || 'Άγνωστο σφάλμα'
+  // Το imapflow δίνει γενικό «Command failed» σε λάθος κωδικό — η πραγματική αιτία είναι στα πεδία.
+  if (err && err.authenticationFailed) return 'Αποτυχία σύνδεσης: λάθος όνομα χρήστη ή κωδικός.'
+  const detail = err && (err.responseText || err.serverResponseCode)
   if (/auth/i.test(m) || /login/i.test(m) || /credentials/i.test(m))
     return 'Αποτυχία σύνδεσης: λάθος όνομα χρήστη ή κωδικός.'
   if (/timeout/i.test(m) || /ETIMEDOUT|ENOTFOUND|ECONNREFUSED/i.test(m))
     return 'Αποτυχία σύνδεσης με τον διακομιστή (έλεγξε δίκτυο/διακομιστή/θύρα).'
-  return `Αποτυχία: ${m}`
+  if (/certificate|self.signed|CERT_/i.test(m))
+    return 'Αποτυχία ασφαλούς σύνδεσης (πιστοποιητικό). Πιθανόν το antivirus ελέγχει την αλληλογραφία — απενεργοποίησε τον έλεγχο e-mail/SSL του antivirus ή δοκίμασε από άλλο δίκτυο.'
+  return detail ? `Αποτυχία: ${m} (${detail})` : `Αποτυχία: ${m}`
 }
 
 // Envelope-score ενός μηνύματος: πλήθος ταιριασμάτων στα κριτήρια που ελέγχονται φθηνά (χωρίς λήψη):
@@ -259,6 +264,108 @@ async function downloadByUid(config, mailbox, uid) {
   }
 }
 
+// Αποκωδικοποίηση ονόματος αρχείου από bodyStructure (encoded-words =?UTF-8?B?...?=), best-effort.
+function decodeName(s) {
+  try {
+    return require('libmime').decodeWords(String(s || ''))
+  } catch {
+    return String(s || '')
+  }
+}
+
+// Όνομα του πρώτου συνημμένου PDF από το bodyStructure (χωρίς λήψη του μηνύματος) ή ''.
+function pdfNameFromStructure(node) {
+  if (!node) return ''
+  const name = decodeName(
+    (node.dispositionParameters && node.dispositionParameters.filename) ||
+      (node.parameters && node.parameters.name) ||
+      ''
+  )
+  if (/\.pdf$/i.test(name) || /pdf/i.test(node.type || '')) return name || 'ΣΕΠ.pdf'
+  for (const child of node.childNodes || []) {
+    const n = pdfNameFromStructure(child)
+    if (n) return n
+  }
+  return ''
+}
+
+// Πρώτη χρήση (άδεια βάση): ΟΛΕΣ οι λίστες των τελευταίων searchDays ημερών, σε όλους τους φακέλους.
+// Ταυτοποίηση όπως στο checkLatest (≥ 2 ορισμένα κριτήρια), αλλά το όνομα PDF ελέγχεται από το
+// bodyStructure ώστε να κατεβαίνουν ΜΟΝΟ τα μηνύματα που ταιριάζουν. Ίδιο μήνυμα σε πολλούς φακέλους
+// (ίδιο Message-ID) μετράει μία φορά. Επιστρέφει { ok, lists: [{ mailbox, uid, date, messageId,
+// subject, filename, content }] } σε ΧΡΟΝΟΛΟΓΙΚΗ σειρά (παλαιότερη πρώτη) ή { error }.
+const MAX_BULK_LISTS = 40
+async function fetchAllLists(config) {
+  const cfg = withDefaults(config)
+  const client = makeClient(cfg)
+  try {
+    await client.connect()
+    const found = new Map() // κλειδί (Message-ID ή φάκελος:uid) → υποψήφιο
+    for (const box of await listSelectable(client)) {
+      let lock = null
+      try {
+        lock = await client.getMailboxLock(box.path)
+        const uids = await client.search({ since: daysAgo(cfg.searchDays) }, { uid: true })
+        if (!uids || !uids.length) continue
+        const q = { uid: true, envelope: true, internalDate: true, bodyStructure: true }
+        for await (const msg of client.fetch({ uid: uids }, q)) {
+          const env = msg.envelope || {}
+          const envScore = envelopeScore(env, cfg)
+          if (envScore < 1) continue
+          const pdfName = pdfNameFromStructure(msg.bodyStructure)
+          if (!pdfName) continue
+          if (envScore + (contains(pdfName, cfg.filenameMatch) ? 1 : 0) < 2) continue
+          const messageId = (env.messageId || '').trim()
+          const key = messageId || `${box.path}:${msg.uid}`
+          if (found.has(key)) continue
+          const date = msg.internalDate || env.date || null
+          found.set(key, {
+            mailbox: box.path,
+            uid: msg.uid,
+            date,
+            t: date ? new Date(date).getTime() : 0,
+            messageId,
+            subject: env.subject || '',
+          })
+        }
+      } catch (err) {
+        if (connectionLost(client)) throw err
+      } finally {
+        if (lock) try { lock.release() } catch {}
+      }
+    }
+    // Οι πιο πρόσφατες MAX_BULK_LISTS, σε χρονολογική σειρά.
+    const picked = [...found.values()].sort((a, b) => a.t - b.t).slice(-MAX_BULK_LISTS)
+    const lists = []
+    for (const c of picked) {
+      let lock = null
+      try {
+        lock = await client.getMailboxLock(c.mailbox)
+        const att = await fetchPdfAttachment(client, c.uid)
+        if (!att) continue
+        lists.push({
+          mailbox: c.mailbox,
+          uid: c.uid,
+          date: c.date,
+          messageId: c.messageId,
+          subject: c.subject,
+          filename: att.filename,
+          content: att.content,
+        })
+      } catch (err) {
+        if (connectionLost(client)) throw err
+      } finally {
+        if (lock) try { lock.release() } catch {}
+      }
+    }
+    return { ok: true, lists }
+  } catch (err) {
+    return { error: friendly(err) }
+  } finally {
+    try { await client.logout() } catch { try { client.close() } catch {} }
+  }
+}
+
 // Καθαρισμός HTML σε απλό κείμενο (πρόχειρο) — fallback όταν λείπει το text/plain μέρος.
 function htmlToText(html) {
   return String(html || '')
@@ -363,4 +470,4 @@ async function fetchCalendarMatches(config, rules, knownIds) {
   }
 }
 
-module.exports = { testConnection, checkLatest, downloadByUid, fetchCalendarMatches, norm, contains, DEFAULT_SEARCH_DAYS }
+module.exports = { testConnection, checkLatest, downloadByUid, fetchCalendarMatches, fetchAllLists, norm, contains, DEFAULT_SEARCH_DAYS }

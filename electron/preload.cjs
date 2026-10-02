@@ -84,8 +84,9 @@ contextBridge.exposeInMainWorld('api', {
   mailSetConfig: (cfg) => ipcRenderer.invoke('mail:setConfig', cfg),
   mailTestConnection: () => ipcRenderer.invoke('mail:test'),
   mailClearCredentials: () => ipcRenderer.invoke('mail:clearCredentials'),
-  mailCheck: () => ipcRenderer.invoke('mail:check'),
+  mailCheck: (opts) => ipcRenderer.invoke('mail:check', opts),
   mailImportMessage: (id) => ipcRenderer.invoke('mail:import', id),
+  mailImportAll: () => ipcRenderer.invoke('mail:importAll'),
   // Κανόνες e-mail → Ημερολόγιο.
   mailGetCalendarRules: () => ipcRenderer.invoke('mail:getCalendarRules'),
   mailSetCalendarRules: (rules) => ipcRenderer.invoke('mail:setCalendarRules', rules),

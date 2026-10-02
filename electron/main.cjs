@@ -1,6 +1,6 @@
 'use strict'
 
-const { app, BrowserWindow, ipcMain, dialog, shell, safeStorage, session, screen, net } = require('electron')
+const { app, BrowserWindow, ipcMain, dialog, shell, safeStorage, session, screen, net, utilityProcess } = require('electron')
 const fs = require('fs')
 const path = require('path')
 const crypto = require('crypto')
@@ -9,7 +9,6 @@ const db = require('./db.cjs')
 const grades = require('./grades.cjs')
 const importer = require('./importer.cjs')
 const documents = require('./documents.cjs')
-const mail = require('./mail.cjs')
 const updater = require('./updater.cjs')
 const telemetry = require('./telemetry.cjs')
 
@@ -77,7 +76,12 @@ function nowIso() {
 }
 
 function todayDisplay() {
-  const d = new Date()
+  return displayOf(new Date())
+}
+
+// Ημερομηνία (Date/ISO) -> 'DD/MM/YYYY' (τοπική ώρα).
+function displayOf(v) {
+  const d = new Date(v)
   return `${String(d.getDate()).padStart(2, '0')}/${String(d.getMonth() + 1).padStart(2, '0')}/${d.getFullYear()}`
 }
 
@@ -268,7 +272,7 @@ const ACTION_CHANNELS = new Set([
   'calendar:addNote', 'calendar:updateNote', 'calendar:deleteNote', 'calendar:saveDocx',
   'observatory:appendNote', 'contact:send',
   'report:saveDocx', 'backup:now', 'backup:export', 'backup:import',
-  'mail:import', 'mail:runCalendarRules', 'mail:setConfig',
+  'mail:import', 'mail:importAll', 'mail:runCalendarRules', 'mail:setConfig',
 ])
 const rawHandle = ipcMain.handle.bind(ipcMain)
 ipcMain.handle = (channel, fn) =>
@@ -437,7 +441,8 @@ function insertRecords(filePath, parsed, meta = {}) {
   // με τον normalizer αποχωρήσεων (`norm`, πιο κάτω).
   const roomKey = (v) => String(v == null ? '' : v).replace(/\s+/g, '').toLowerCase()
 
-  const afixis = todayDisplay()
+  // Ημερομηνία άφιξης: σήμερα· στη μαζική εισαγωγή πρώτης χρήσης = ημερομηνία της λίστας (e-mail).
+  const afixis = meta.arrivalDate ? displayOf(meta.arrivalDate) : todayDisplay()
   let imported = 0
   let excluded = 0
   let skipped = 0
@@ -1073,6 +1078,12 @@ function sanitizeName(n) {
 
 // Προσωρινή μνήμη τελευταίου κατεβασμένου συνημμένου (για να μη ξανακατεβαίνει στο import).
 let mailCache = null // { mailbox, uid, filename, content }
+// Σάρωση πρώτης χρήσης (άδεια βάση): όλες οι λίστες του διαστήματος, χρονολογικά.
+let mailBulkCache = null // [{ mailbox, uid, date, messageId, subject, filename, content }]
+
+function batchesCount() {
+  return db.query('SELECT COUNT(*) AS c FROM batches')[0].c
+}
 
 // Σειριοποίηση συνδέσεων IMAP: ποτέ δύο ταυτόχρονες συνεδρίες (ο poller ελέγχει λίστα & κανόνες
 // ημερολογίου μαζί — ταυτόχρονες συνδέσεις στο sch.gr κατέληγαν σε Socket timeout).
@@ -1081,6 +1092,59 @@ function withImap(fn) {
   const run = imapChain.then(fn, fn)
   imapChain = run.catch(() => {})
   return run
+}
+
+// Όρια χρόνου ανά λειτουργία IMAP: μετά από αυτά η διεργασία σκοτώνεται & επιστρέφεται σφάλμα.
+const MAIL_TIMEOUTS = {
+  testConnection: 60 * 1000,
+  checkLatest: 10 * 60 * 1000,
+  downloadByUid: 5 * 60 * 1000,
+  fetchCalendarMatches: 10 * 60 * 1000,
+  fetchAllLists: 15 * 60 * 1000,
+}
+
+// Εκτέλεση λειτουργίας του mail.cjs σε ξεχωριστή διεργασία (mailWorker.cjs), ώστε το IMAP να μην
+// μπλοκάρει ποτέ το κύριο νήμα (παράθυρο «άσπρο/παγωμένο» σε μεγάλα γραμματοκιβώτια/αργό server).
+// Επιστρέφει ό,τι θα επέστρεφε η λειτουργία ({ ok, ... } ή { error }). Δεν ρίχνει ποτέ.
+function runMailOp(op, ...args) {
+  return new Promise((resolve) => {
+    let done = false
+    let child = null
+    const finish = (r) => {
+      if (done) return
+      done = true
+      clearTimeout(timer)
+      try { if (child) child.kill() } catch {}
+      resolve(r)
+    }
+    const timer = setTimeout(() => {
+      log.warn(`mail ${op}: λήξη χρόνου — τερματισμός διεργασίας`)
+      finish({ error: 'Ο διακομιστής e-mail δεν απάντησε εγκαίρως. Δοκίμασε ξανά αργότερα (αν τρέχει Thunderbird/Outlook, δοκίμασε και με αυτό κλειστό).' })
+    }, MAIL_TIMEOUTS[op] || 5 * 60 * 1000)
+    try {
+      child = utilityProcess.fork(path.join(__dirname, 'mailWorker.cjs'), [], {
+        serviceName: 'Mathitologio e-mail',
+        stdio: 'ignore',
+      })
+    } catch (err) {
+      log.error('mail worker fork', err)
+      return finish({ error: `Αποτυχία εκκίνησης ελέγχου e-mail: ${(err && err.message) || err}` })
+    }
+    child.on('message', (msg) => {
+      if (msg && msg.error) return finish({ error: `Αποτυχία: ${msg.error}` })
+      const r = (msg && msg.result) || { error: 'Κενή απάντηση από τον έλεγχο e-mail.' }
+      // Το Buffer φτάνει ως Uint8Array μέσω structured clone.
+      if (r && r.content && !Buffer.isBuffer(r.content)) r.content = Buffer.from(r.content)
+      if (r && Array.isArray(r.lists))
+        for (const l of r.lists) if (l.content && !Buffer.isBuffer(l.content)) l.content = Buffer.from(l.content)
+      finish(r)
+    })
+    child.on('exit', (code) => {
+      if (!done) log.warn(`mail ${op}: η διεργασία τερμάτισε απρόσμενα (code ${code})`)
+      finish({ error: 'Ο έλεγχος e-mail διακόπηκε απρόσμενα. Δοκίμασε ξανά.' })
+    })
+    child.postMessage({ op, args })
+  })
 }
 
 ipcMain.handle('mail:getConfig', () => {
@@ -1131,16 +1195,60 @@ ipcMain.handle('mail:test', async () => {
   const cfg = getMailConfig()
   if (!cfg.username || !cfg.password)
     return { error: 'Συμπλήρωσε όνομα χρήστη και κωδικό πρώτα.' }
-  return withImap(() => mail.testConnection(cfg))
+  return withImap(() => runMailOp('testConnection', cfg))
 })
 
 // Έλεγχος για νέα λίστα: εντοπίζει την πιο πρόσφατη και συγκρίνει το όνομα του συνημμένου
 // με το όνομα της τελευταίας λίστας που εισήχθη (dedup βάσει filename «ΣΕΠ <ημ/νία>.pdf»).
-ipcMain.handle('mail:check', async () => {
+ipcMain.handle('mail:check', async (_e, opts = {}) => {
   const cfg = getMailConfig()
   if (!cfg.username || !cfg.password) return { ok: true, configured: false }
+  // Πρώτη χρήση (καμία εισαγωγή λίστας): προτείνονται ΟΛΕΣ οι λίστες του διαστήματος, για σωστό
+  // ιστορικό αφίξεων/αποχωρήσεων. ΜΟΝΟ για άδεια βάση — αλλιώς η σειρά των λιστών θα χαλούσε.
+  if (batchesCount() === 0) {
+    // Ο αυτόματος έλεγχος επαναχρησιμοποιεί την ήδη κατεβασμένη σάρωση της συνεδρίας.
+    if (!(mailBulkCache && !(opts && opts.manual))) {
+      const r = await withImap(() => runMailOp('fetchAllLists', cfg))
+      if (r.error) return { error: r.error }
+      mailBulkCache = r.lists || []
+    }
+    const lists = mailBulkCache
+    if (lists.length >= 2) {
+      return {
+        ok: true,
+        configured: true,
+        found: true,
+        bulk: true,
+        lists: lists.map((l) => ({
+          mailbox: l.mailbox,
+          uid: l.uid,
+          filename: l.filename,
+          subject: l.subject,
+          date: l.date ? new Date(l.date).toISOString() : null,
+        })),
+      }
+    }
+    if (lists.length === 1) {
+      const l = lists[0]
+      mailCache = { ...l }
+      return {
+        ok: true,
+        configured: true,
+        found: true,
+        mailbox: l.mailbox,
+        uid: l.uid,
+        filename: l.filename,
+        subject: l.subject,
+        messageId: l.messageId,
+        date: l.date ? new Date(l.date).toISOString() : null,
+        alreadyImported: false,
+      }
+    }
+    return { ok: true, configured: true, found: false }
+  }
+  mailBulkCache = null
   const known = mailCache ? { mailbox: mailCache.mailbox, uid: mailCache.uid } : null
-  const r = await withImap(() => mail.checkLatest(cfg, known))
+  const r = await withImap(() => runMailOp('checkLatest', cfg, known))
   if (r.error) return { error: r.error }
   if (!r.found) return { ok: true, configured: true, found: false, noAttachment: !!r.noAttachment }
   // unchanged → επαναχρησιμοποίηση του ήδη κατεβασμένου συνημμένου (χωρίς νέα λήψη).
@@ -1181,31 +1289,84 @@ ipcMain.handle('mail:import', async (_e, id = {}) => {
   const mailbox = id && id.mailbox
   const uid = id && id.uid
   let att = mailCache && mailCache.mailbox === mailbox && mailCache.uid === uid ? mailCache : null
+  if (!att && mailBulkCache)
+    att = mailBulkCache.find((l) => l.mailbox === mailbox && l.uid === uid) || null
   if (!att) {
     const cfg = getMailConfig()
     if (!cfg.username || !cfg.password) return { error: 'Δεν υπάρχουν στοιχεία σύνδεσης.' }
-    const r = await withImap(() => mail.downloadByUid(cfg, mailbox, uid))
+    const r = await withImap(() => runMailOp('downloadByUid', cfg, mailbox, uid))
     if (r.error) return { error: r.error }
     att = { mailbox, uid, filename: r.filename, content: r.content, messageId: r.messageId || '', date: r.date || null }
   }
-  // Το όνομα αρχείου γίνεται source_filename του batch (για τον έλεγχο «ήδη εισαχθεί»).
-  const dir = path.join(app.getPath('temp'), 'mathitologio-mail')
   try {
-    fs.mkdirSync(dir, { recursive: true })
-    const tmp = path.join(dir, sanitizeName(att.filename))
-    fs.writeFileSync(tmp, att.content)
+    const res = await importAttachment(att)
+    mailCache = null
+    mailBulkCache = null
+    return res
+  } catch (err) {
+    return { error: `Αποτυχία εισαγωγής από e-mail: ${err && err.message ? err.message : err}` }
+  }
+})
+
+// Εισαγωγή ενός συνημμένου PDF (μέσω προσωρινού αρχείου) με τον υπάρχοντα importer. Ρίχνει σε σφάλμα.
+// Το όνομα αρχείου γίνεται source_filename του batch (για τον έλεγχο «ήδη εισαχθεί»).
+// extra.arrivalDate → ημερομηνία άφιξης των νέων μαθητών (αντί για σήμερα).
+async function importAttachment(att, extra = {}) {
+  const dir = path.join(app.getPath('temp'), 'mathitologio-mail')
+  fs.mkdirSync(dir, { recursive: true })
+  const tmp = path.join(dir, sanitizeName(att.filename))
+  fs.writeFileSync(tmp, att.content)
+  try {
     const parsed = await importer.parsePdf(tmp)
     // Μεταδεδομένα e-mail στο batch: ώρα άφιξης (INTERNALDATE) & Message-ID (κλειδί dedup).
     const meta = {
       emailDate: att.date ? new Date(att.date).toISOString() : null,
       emailMessageId: att.messageId || null,
+      ...extra,
     }
-    const res = insertRecords(tmp, parsed, meta)
+    return insertRecords(tmp, parsed, meta)
+  } finally {
     try { fs.unlinkSync(tmp) } catch {}
-    mailCache = null
-    return res
-  } catch (err) {
-    return { error: `Αποτυχία εισαγωγής από e-mail: ${err && err.message ? err.message : err}` }
+  }
+}
+
+// Μαζική εισαγωγή πρώτης χρήσης: όλες οι λίστες της σάρωσης, με χρονολογική σειρά (παλαιότερη
+// πρώτη), ώστε οι αφίξεις να παίρνουν την ημερομηνία της λίστας όπου πρωτοεμφανίστηκαν. Επιτρέπεται
+// ΜΟΝΟ σε άδεια βάση. Οι αποχωρήσεις προκύπτουν μία φορά στο τέλος: όσοι ενεργοί λείπουν από την
+// τελευταία λίστα (αθροιστικά, αφού οι ενδιάμεσες αποχωρήσεις δεν εφαρμόζονται αυτόματα).
+ipcMain.handle('mail:importAll', async () => {
+  if (batchesCount() > 0)
+    return { error: 'Η μαζική εισαγωγή επιτρέπεται μόνο όταν δεν έχει εισαχθεί ακόμη καμία λίστα.' }
+  const lists = mailBulkCache || []
+  if (!lists.length) return { error: 'Δεν υπάρχουν λίστες προς εισαγωγή — κάνε ξανά «Έλεγχος για νέα λίστα».' }
+  let imported = 0
+  let last = null
+  const failed = []
+  const missing = new Set()
+  for (const l of lists) {
+    try {
+      const res = await importAttachment(l, { arrivalDate: l.date || null })
+      imported += res.imported || 0
+      for (const m of res.missingFields || []) missing.add(m)
+      last = res
+    } catch (err) {
+      log.warn('mail:importAll', l.filename, err && err.message ? err.message : err)
+      failed.push(l.filename)
+    }
+  }
+  mailCache = null
+  mailBulkCache = null
+  if (!last) return { error: `Καμία λίστα δεν εισήχθη (αποτυχία: ${failed.join(', ')}).` }
+  return {
+    canceled: false,
+    bulk: true,
+    lists: lists.length - failed.length,
+    failed,
+    imported,
+    excluded: last.excluded,
+    missingFields: [...missing],
+    departed: last.departed,
+    roomChanges: [],
   }
 })
 
@@ -1244,11 +1405,11 @@ async function runCalendarRules() {
   const known = new Set(knownRows.map((r) => String(r.source_message_id)))
   // Μία επανάληψη σε σφάλμα (συνήθως κομμένη σύνδεση/timeout του server). Τα ευρήματα πριν το
   // σφάλμα κρατιούνται ώστε να εισαχθούν ούτως ή άλλως.
-  let r = await withImap(() => mail.fetchCalendarMatches(cfg, rules, known))
+  let r = await withImap(() => runMailOp('fetchCalendarMatches', cfg, rules, [...known]))
   let found = r.matches || []
   if (r.error) {
     log.warn('calendar rules: αποτυχία σάρωσης, επανάληψη —', r.error)
-    const retry = await withImap(() => mail.fetchCalendarMatches(cfg, rules, known))
+    const retry = await withImap(() => runMailOp('fetchCalendarMatches', cfg, rules, [...known]))
     found = found.concat(retry.matches || [])
     r = retry
     if (r.error) log.warn('calendar rules: αποτυχία και στην επανάληψη —', r.error)

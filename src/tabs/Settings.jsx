@@ -4,7 +4,7 @@ import Schools from './Schools'
 import PromotionModal from '../components/PromotionModal'
 import ResetDataModal from '../components/ResetDataModal'
 import { useConfirm } from '../components/ConfirmProvider'
-import { UserCog, Save, School, CalendarRange, GraduationCap, DatabaseBackup, FolderOpen, Play, FileText, FilePlus2, Trash2, AlertTriangle, Mail, RefreshCw, KeyRound, Search, HelpCircle, FolderArchive, Plus, CalendarPlus, BarChart3, Database, Settings2 } from 'lucide-react'
+import { UserCog, Save, School, CalendarRange, GraduationCap, DatabaseBackup, FolderOpen, Play, FileText, FilePlus2, Trash2, AlertTriangle, Mail, RefreshCw, KeyRound, Search, HelpCircle, FolderArchive, Plus, CalendarPlus, BarChart3, Database, Settings2, Eye, EyeOff } from 'lucide-react'
 import { loadPackages, defaultPackages, SIGNER_LABELS } from '../lib/registrationPackages'
 
 // Βαθμίδες με σταθερό κλειδί `type` (ίδιο με το backend) και ετικέτα εμφάνισης.
@@ -797,6 +797,7 @@ function EmailImportSection({ emailCheck, onEmailConfigChange }) {
   const [username, setUsername] = useState('')
   const [password, setPassword] = useState('')
   const [hasPassword, setHasPassword] = useState(false)
+  const [showPassword, setShowPassword] = useState(false)
   const [autoFreq, setAutoFreq] = useState('off')
   const [encAvailable, setEncAvailable] = useState(true)
   // Επεξεργάσιμα κριτήρια ταυτοποίησης του e-mail (≥2 πρέπει να είναι συμπληρωμένα).
@@ -926,13 +927,27 @@ function EmailImportSection({ emailCheck, onEmailConfigChange }) {
           <label className="mb-1 block text-sm text-slate-600">
             Κωδικός {hasPassword && <span className="text-xs text-green-600">(αποθηκευμένος — άφησέ το κενό για να μη γίνει αλλαγή)</span>}
           </label>
-          <input
-            type="password"
-            value={password}
-            onChange={(e) => setPassword(e.target.value)}
-            placeholder={hasPassword ? '●●●●●●●● (αποθηκευμένος)' : 'Κωδικός λογαριασμού'}
-            className={inputCls}
-          />
+          <div className="relative">
+            <input
+              type={showPassword ? 'text' : 'password'}
+              value={password}
+              onChange={(e) => setPassword(e.target.value)}
+              placeholder={hasPassword ? '●●●●●●●● (αποθηκευμένος)' : 'Κωδικός λογαριασμού'}
+              className={inputCls + ' pr-10'}
+              autoComplete="off"
+              spellCheck={false}
+            />
+            {/* Ματάκι: εμφάνιση/απόκρυψη του κωδικού όσο πληκτρολογείται. */}
+            <button
+              type="button"
+              onClick={() => setShowPassword((v) => !v)}
+              title={showPassword ? 'Απόκρυψη κωδικού' : 'Εμφάνιση κωδικού'}
+              aria-label={showPassword ? 'Απόκρυψη κωδικού' : 'Εμφάνιση κωδικού'}
+              className="absolute inset-y-0 right-0 flex items-center px-3 text-slate-400 hover:text-slate-600"
+            >
+              {showPassword ? <EyeOff size={16} /> : <Eye size={16} />}
+            </button>
+          </div>
         </div>
         <div>
           <label className="mb-1 block text-sm text-slate-600">Διακομιστής IMAP</label>

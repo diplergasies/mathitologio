@@ -12,6 +12,7 @@ import HelpModal from './components/HelpModal'
 import DepartureDetectionModal from './components/DepartureDetectionModal'
 import RoomChangesModal from './components/RoomChangesModal'
 import EmailPromptModal from './components/EmailPromptModal'
+import EmailBulkPromptModal from './components/EmailBulkPromptModal'
 import AnnouncementModal from './components/AnnouncementModal'
 import UpdateBanner from './components/UpdateBanner'
 import { useConfirm } from './components/ConfirmProvider'
@@ -43,6 +44,7 @@ export default function App() {
   const [roomChanges, setRoomChanges] = useState(null)
   const [emailPrompt, setEmailPrompt] = useState(null) // { uid, filename, date, subject }
   const [emailBusy, setEmailBusy] = useState(false)
+  const [emailBulk, setEmailBulk] = useState(null) // [{ mailbox, uid, filename, subject, date }] — πρώτη χρήση
   const [emailTick, setEmailTick] = useState(0) // αλλαγές ρυθμίσεων e-mail → επαναρύθμιση poller
   const emailTimerRef = useRef(null)
   const handledUidRef = useRef(null) // uid που ήδη εισήχθη ή απορρίφθηκε (να μη ξαναρωτά)
@@ -140,7 +142,7 @@ export default function App() {
 
   // Έλεγχος για νέα λίστα. manual=true → εμφανίζει και μηνύματα «δεν βρέθηκε/ήδη εισαχθεί».
   async function checkEmail({ manual } = {}) {
-    const res = await api.mailCheck()
+    const res = await api.mailCheck({ manual: !!manual })
     if (!res) return
     if (res.error) {
       if (manual) showToast(res.error, 'error')
@@ -158,6 +160,14 @@ export default function App() {
             : 'Δεν βρέθηκε e-mail που να ταιριάζει με τα κριτήρια που όρισες.',
           'warn'
         )
+      return
+    }
+    // Πρώτη χρήση (άδεια βάση) με πολλές λίστες → επιλογή «όλες / μόνο η πιο πρόσφατη».
+    if (res.bulk) {
+      const last = res.lists[res.lists.length - 1]
+      const bulkKey = `bulk:${res.lists.length}:${last.mailbox}:${last.uid}`
+      if (!manual && handledUidRef.current === bulkKey) return
+      setEmailBulk(res.lists)
       return
     }
     const msgKey = `${res.mailbox}:${res.uid}`
@@ -178,6 +188,32 @@ export default function App() {
     handledUidRef.current = `${prompt.mailbox}:${prompt.uid}`
     setEmailPrompt(null)
     reportImport(res)
+  }
+
+  async function importAllFromEmail() {
+    setEmailBusy(true)
+    const res = await api.mailImportAll()
+    setEmailBusy(false)
+    setEmailBulk(null)
+    if (res && res.bulk && !res.error) {
+      reportImport(res)
+      let msg = `Εισήχθησαν ${res.lists} λίστες με χρονολογική σειρά: ${res.imported} μαθητές σχολικής ηλικίας στις Αφίξεις.`
+      if (res.failed && res.failed.length) msg += ` Απέτυχαν: ${res.failed.join(', ')}.`
+      showToast(msg, res.failed && res.failed.length ? 'warn' : 'ok')
+    } else reportImport(res)
+  }
+
+  async function importLatestFromEmail(item) {
+    await importFromEmail(item)
+    setEmailBulk(null)
+  }
+
+  function dismissEmailBulk() {
+    if (emailBulk) {
+      const last = emailBulk[emailBulk.length - 1]
+      handledUidRef.current = `bulk:${emailBulk.length}:${last.mailbox}:${last.uid}`
+    }
+    setEmailBulk(null)
   }
 
   function dismissEmailPrompt() {
@@ -366,6 +402,16 @@ export default function App() {
           busy={emailBusy}
           onImport={importFromEmail}
           onClose={dismissEmailPrompt}
+        />
+      )}
+
+      {emailBulk && (
+        <EmailBulkPromptModal
+          lists={emailBulk}
+          busy={emailBusy}
+          onImportAll={importAllFromEmail}
+          onImportLatest={importLatestFromEmail}
+          onClose={dismissEmailBulk}
         />
       )}
 
