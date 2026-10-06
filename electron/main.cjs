@@ -11,6 +11,7 @@ const importer = require('./importer.cjs')
 const documents = require('./documents.cjs')
 const updater = require('./updater.cjs')
 const telemetry = require('./telemetry.cjs')
+const outbound = require('./outbound.cjs')
 
 // ── App-wide error log + global handlers ──────────────────────────────────────
 // Ξεχωριστό αρχείο (main.log) από τον updater.log. Πλήρες stack μένει τοπικά· στο
@@ -273,6 +274,8 @@ const ACTION_CHANNELS = new Set([
   'observatory:appendNote', 'contact:send',
   'report:saveDocx', 'backup:now', 'backup:export', 'backup:import',
   'mail:import', 'mail:importAll', 'mail:runCalendarRules', 'mail:setConfig',
+  'mail:setOutboundRules', 'mail:sendTest',
+  'pending:send', 'pending:dismiss', 'pending:packageDone',
 ])
 const rawHandle = ipcMain.handle.bind(ipcMain)
 ipcMain.handle = (channel, fn) =>
@@ -771,7 +774,8 @@ ipcMain.handle('students:enroll', (_e, { id, schoolId }) => {
   } catch (err) {
     return { ok: false, error: err.message }
   }
-  return { ok: true, schoolAssigned: assigned != null }
+  const pkg = outbound.onEnrolled(db, [id], nowIso())
+  return { ok: true, schoolAssigned: assigned != null, packageMode: pkg.packageMode }
 })
 
 // Ανάθεση/αλλαγή σχολείου σε εγγεγραμμένο μαθητή (από την καρτέλα Μαθητές).
@@ -788,12 +792,14 @@ ipcMain.handle('students:setSchool', (_e, { id, schoolId }) => {
   return { ok: true }
 })
 
-ipcMain.handle('students:delete', (_e, { id, reason } = {}) => {
+ipcMain.handle('students:delete', async (_e, { id, reason } = {}) => {
+  const snap = outbound.enrolledSnapshots(db, [id])
   db.run(
     `UPDATE students SET prev_status=status, status='deleted', deleted_at=$now, deletion_reason=$r, updated_at=$now WHERE id=$id`,
     { $now: nowIso(), $r: reason || null, $id: id }
   )
-  return { ok: true }
+  const email = await dispatchDeletion(snap)
+  return { ok: true, outbound: email }
 })
 
 ipcMain.handle('students:restore', (_e, id) => {
@@ -803,6 +809,7 @@ ipcMain.handle('students:restore', (_e, id) => {
     `UPDATE students SET status=$prev, prev_status=NULL, deleted_at=NULL, deletion_reason=NULL, updated_at=$now WHERE id=$id`,
     { $prev: prev, $now: nowIso(), $id: id }
   )
+  outbound.pruneStudents(db, [id], nowIso())
   return { ok: true, status: prev }
 })
 
@@ -1101,6 +1108,7 @@ const MAIL_TIMEOUTS = {
   downloadByUid: 5 * 60 * 1000,
   fetchCalendarMatches: 10 * 60 * 1000,
   fetchAllLists: 15 * 60 * 1000,
+  sendMessage: 60 * 1000,
 }
 
 // Εκτέλεση λειτουργίας του mail.cjs σε ξεχωριστή διεργασία (mailWorker.cjs), ώστε το IMAP να μην
@@ -1145,6 +1153,78 @@ function runMailOp(op, ...args) {
     })
     child.postMessage({ op, args })
   })
+}
+
+// Αποστολή μέσω SMTP με τα αποθηκευμένα στοιχεία IMAP. Δεν μπλοκάρει το παράθυρο (ξεχωριστή διεργασία).
+async function sendSchoolEmail({ to, cc, subject, text }) {
+  const cfg = getMailConfig()
+  if (!cfg.username || !cfg.password)
+    return { error: 'Συμπλήρωσε όνομα χρήστη και κωδικό e-mail στις Ρυθμίσεις.' }
+  const toCheck = outbound.parseAddresses(to)
+  if (toCheck.error || !toCheck.addresses.length) return { error: toCheck.error || 'Συμπλήρωσε παραλήπτη.' }
+  let ccList = ''
+  if (String(cc || '').trim()) {
+    const ccCheck = outbound.parseAddresses(cc)
+    if (ccCheck.error) return ccCheck
+    ccList = ccCheck.addresses.join(', ')
+  }
+  const s = db.getAllSettings()
+  return runMailOp('sendMessage', {
+    host: String(s.mail_smtp_host || 'mail.sch.gr').trim(),
+    port: Number(s.mail_smtp_port) || 465,
+    username: cfg.username,
+    password: cfg.password,
+    to: toCheck.addresses.join(', '),
+    cc: ccList,
+    subject: subject || '',
+    text: text || '',
+  })
+}
+
+// Μετά από διαγραφή εγγεγραμμένων: ένα e-mail ανά σχολείο, αμέσως ή στην ουρά Εκκρεμοτήτων.
+async function dispatchDeletion(rows) {
+  const rule = outbound.activeRule(outbound.loadRules(db.getAllSettings()), 'student.deleted')
+  const groups = outbound.groupBySchool(rows)
+  if (!rule || !groups.length) return { sent: 0, queued: 0, errors: [] }
+  const now = nowIso()
+  if (rule.mode !== 'auto') {
+    return { sent: 0, queued: outbound.queueDeletionGroups(db, groups, rule, now), errors: [] }
+  }
+  let sent = 0
+  const failed = []
+  const errors = []
+  for (const group of groups) {
+    const school = group.schoolId
+      ? db.query('SELECT name, email FROM schools WHERE id=$id', { $id: group.schoolId })[0]
+      : null
+    const email = school && String(school.email || '').trim()
+    if (!email) {
+      const why = group.schoolName ? `Το σχολείο «${group.schoolName}» δεν έχει e-mail.` : 'Μαθητές χωρίς σχολείο.'
+      failed.push({ group, error: why })
+      errors.push(why)
+      continue
+    }
+    const msg = outbound.deletionMessage(outbound.deletionPayload(group, rule, null), school.name, email)
+    const res = await sendSchoolEmail(msg)
+    if (res && res.error) {
+      failed.push({ group, error: res.error })
+      errors.push(res.error)
+    } else sent++
+  }
+  let queued = 0
+  if (failed.length) {
+    queued = outbound.queueDeletionGroups(
+      db,
+      failed.map((f) => f.group),
+      rule,
+      now,
+      (g) => {
+        const hit = failed.find((f) => f.group === g)
+        return hit ? hit.error : 'Αποτυχία αποστολής.'
+      }
+    )
+  }
+  return { sent, queued, errors }
 }
 
 ipcMain.handle('mail:getConfig', () => {
@@ -1447,6 +1527,78 @@ ipcMain.handle('mail:setCalendarRules', (_e, rules = []) => {
 
 ipcMain.handle('mail:runCalendarRules', async () => runCalendarRules())
 
+ipcMain.handle('mail:getOutboundRules', () => {
+  const s = db.getAllSettings()
+  return {
+    rules: outbound.loadRules(s),
+    smtpHost: s.mail_smtp_host || 'mail.sch.gr',
+    smtpPort: Number(s.mail_smtp_port) || 465,
+    username: s.mail_username || '',
+  }
+})
+
+ipcMain.handle('mail:setOutboundRules', (_e, payload = {}) => {
+  const rules = outbound.normalizeRules(payload.rules || [])
+  for (const r of rules) {
+    if (r.trigger !== 'student.deleted') continue
+    if (String(r.cc || '').trim()) {
+      const cc = outbound.parseAddresses(r.cc)
+      if (cc.error) return cc
+      r.cc = cc.addresses.join(', ')
+    }
+  }
+  const port = Number(payload.smtpPort) || 465
+  db.setSettings({
+    [outbound.RULES_KEY]: JSON.stringify(rules),
+    mail_smtp_host: String(payload.smtpHost || 'mail.sch.gr').trim() || 'mail.sch.gr',
+    mail_smtp_port: String(port),
+  })
+  return { ok: true, rules }
+})
+
+ipcMain.handle('mail:sendTest', async (_e, { to } = {}) => {
+  return sendSchoolEmail({
+    to,
+    subject: 'Δοκιμή αποστολής — Μαθητολόγιο ΣΕΠ',
+    text: 'Δοκιμαστικό μήνυμα από το Μαθητολόγιο ΣΕΠ. Η αποστολή e-mail δουλεύει.',
+  })
+})
+
+ipcMain.handle('pending:summary', () => outbound.summary(db, nowIso()))
+
+ipcMain.handle('pending:dismiss', (_e, id) => outbound.dismiss(db, id, nowIso()))
+
+ipcMain.handle('pending:packageDone', (_e, { id, studentId } = {}) =>
+  outbound.markPackageStudent(db, id, studentId, nowIso())
+)
+
+ipcMain.handle('pending:send', async (_e, id) => {
+  const row = outbound.loadOpenDeletion(db, id)
+  if (!row) return { error: 'Δεν βρέθηκε η εκκρεμότητα.' }
+  if (row.status === 'done' || row.status === 'dismissed') return { error: 'Η εκκρεμότητα έχει κλείσει.' }
+  const fresh = outbound.refreshAction(db, row, nowIso())
+  if (!fresh) return { error: 'Δεν απομένουν μαθητές σε διαγραφή.' }
+  const payload = fresh.payload
+  if (payload.schoolId == null) return { error: 'Οι μαθητές δεν είχαν σχολείο, οπότε δεν υπάρχει παραλήπτης.' }
+  const school = db.query('SELECT name, email FROM schools WHERE id=$id', { $id: payload.schoolId })[0]
+  const email = school && String(school.email || '').trim()
+  if (!email) {
+    return { error: 'Το σχολείο δεν έχει e-mail. Συμπλήρωσέ το στα σχολεία ευθύνης και ξαναπροσπάθησε.' }
+  }
+  const msg = outbound.deletionMessage(payload, school.name, email)
+  const res = await sendSchoolEmail(msg)
+  if (res && res.error) {
+    payload.lastError = res.error
+    db.run(
+      `UPDATE pending_actions SET status='failed', payload=$p, updated_at=$n WHERE id=$id`,
+      { $p: JSON.stringify(payload), $n: nowIso(), $id: id }
+    )
+    return { error: res.error }
+  }
+  db.run(`UPDATE pending_actions SET status='done', updated_at=$n WHERE id=$id`, { $n: nowIso(), $id: id })
+  return { ok: true }
+})
+
 // ---- Σφάλματα renderer → insights -----------------------------------------
 // window.onerror / unhandledrejection / React ErrorBoundary του renderer.
 ipcMain.handle('telemetry:rendererError', (_e, payload = {}) => {
@@ -1500,43 +1652,50 @@ ipcMain.handle('contact:send', async (_e, { category, name, email, message } = {
 
 // ---- Μαζικές ενέργειες ----------------------------------------------------
 
-ipcMain.handle('students:bulkDelete', (_e, payload = []) => {
+ipcMain.handle('students:bulkDelete', async (_e, payload = []) => {
   // Συμβατότητα: δέχεται είτε πίνακα ids είτε { ids, reason, reasons }. Το reasons ({ [id]: λόγος })
   // δίνει λόγο ΑΝΑ ΜΑΘΗΤΗ και υπερισχύει του κοινού reason.
   const ids = Array.isArray(payload) ? payload : payload.ids || []
   const reason = Array.isArray(payload) ? null : payload.reason || null
   const reasons = !Array.isArray(payload) && payload.reasons && typeof payload.reasons === 'object' ? payload.reasons : null
+  const snap = outbound.enrolledSnapshots(db, ids)
+  const now = nowIso()
   ids.forEach((id) => {
     const own = reasons && Object.prototype.hasOwnProperty.call(reasons, String(id))
     const r = own ? (reasons[String(id)] && String(reasons[String(id)]).trim()) || null : reason
     db.run(
       `UPDATE students SET prev_status=status, status='deleted', deleted_at=$now, deletion_reason=$r, updated_at=$now WHERE id=$id`,
-      { $now: nowIso(), $r: r, $id: id }
+      { $now: now, $r: r, $id: id }
     )
   })
-  return { ok: true, count: ids.length }
+  const email = await dispatchDeletion(snap)
+  return { ok: true, count: ids.length, outbound: email }
 })
 
 ipcMain.handle('students:bulkRestore', (_e, ids = []) => {
+  const now = nowIso()
   ids.forEach((id) => {
     const rows = db.query('SELECT prev_status FROM students WHERE id=$id', { $id: id })
     const prev = rows.length && rows[0].prev_status ? rows[0].prev_status : 'arrival'
     db.run(
       `UPDATE students SET status=$p, prev_status=NULL, deleted_at=NULL, deletion_reason=NULL, updated_at=$now WHERE id=$id`,
-      { $p: prev, $now: nowIso(), $id: id }
+      { $p: prev, $now: now, $id: id }
     )
   })
+  outbound.pruneStudents(db, ids, now)
   return { ok: true, count: ids.length }
 })
 
 // Οριστική (μη αναστρέψιμη) διαγραφή από τη βάση.
 ipcMain.handle('students:purge', (_e, id) => {
   db.run('DELETE FROM students WHERE id=$id', { $id: id })
+  outbound.pruneStudents(db, [id], nowIso())
   return { ok: true }
 })
 
 ipcMain.handle('students:bulkPurge', (_e, ids = []) => {
   ids.forEach((id) => db.run('DELETE FROM students WHERE id=$id', { $id: id }))
+  outbound.pruneStudents(db, ids, nowIso())
   return { ok: true, count: ids.length }
 })
 
@@ -1577,7 +1736,8 @@ ipcMain.handle('students:bulkEnroll', (_e, { ids = [], mode, schoolId }) => {
     if (target) enrolled++
     else needSchool++
   }
-  return { ok: true, enrolled, needSchool, skipped, enrolledIds }
+  const pkg = outbound.onEnrolled(db, enrolledIds, nowIso())
+  return { ok: true, enrolled, needSchool, skipped, enrolledIds, packageMode: pkg.packageMode }
 })
 
 // ---- Προβιβασμός / νέο σχολικό έτος ---------------------------------------
@@ -1616,10 +1776,11 @@ ipcMain.handle('promotion:preview', () => {
 })
 
 // Εφαρμογή προβιβασμού: promotedIds = όσοι προβιβάστηκαν (οι υπόλοιποι μένουν ως έχουν).
-ipcMain.handle('promotion:apply', (_e, promotedIds = []) => {
+ipcMain.handle('promotion:apply', async (_e, promotedIds = []) => {
   let promoted = 0
   let graduated = 0
   let needSchool = 0
+  const graduatedSnaps = []
   const now = nowIso()
 
   for (const id of promotedIds) {
@@ -1638,6 +1799,18 @@ ipcMain.handle('promotion:apply', (_e, promotedIds = []) => {
     if (next.graduated) {
       // Απόφοιτος -> Διαγραφές (soft delete). Σημειώνεται ως «Αποφοίτηση» ώστε να ΜΗΝ προσμετράται
       // στη σχολική διαρροή (Παρατηρητήριο Γ) — δεν είναι διακοπή φοίτησης.
+      const info = s.school_id
+        ? db.query('SELECT name, email FROM schools WHERE id=$id', { $id: s.school_id })[0]
+        : null
+      graduatedSnaps.push({
+        id: s.id,
+        dika: s.dika,
+        onoma: s.onoma,
+        eponymo: s.eponymo,
+        school_id: s.school_id,
+        school_name: info ? info.name : '',
+        school_email: info ? info.email : '',
+      })
       db.run(
         `UPDATE students SET prev_status=status, status='deleted', deleted_at=$now, deletion_reason='Αποφοίτηση', updated_at=$now WHERE id=$id`,
         { $now: now, $id: id }
@@ -1679,7 +1852,16 @@ ipcMain.handle('promotion:apply', (_e, promotedIds = []) => {
     db.setSettings({ gradeRanges: JSON.stringify(shifted) })
   }
 
-  return { ok: true, promoted, graduated, needSchool, yearStart, yearLabel: grades.schoolYearLabel(yearStart) }
+  const email = await dispatchDeletion(graduatedSnaps)
+  return {
+    ok: true,
+    promoted,
+    graduated,
+    needSchool,
+    yearStart,
+    yearLabel: grades.schoolYearLabel(yearStart),
+    outbound: email,
+  }
 })
 
 ipcMain.handle('documents:bulkGenerate', async (_e, { ids = [], templateFiles = [], signees, signee, signatures, extras } = {}) => {
@@ -1783,16 +1965,30 @@ ipcMain.handle('schools:list', () =>
   db.query('SELECT * FROM schools ORDER BY type, name COLLATE NOCASE')
 )
 
-ipcMain.handle('schools:add', (_e, { name, type, dyep, ty }) => {
+function cleanSchoolEmail(email) {
+  const v = String(email || '').trim()
+  if (!v) return { email: null }
+  const check = outbound.parseAddresses(v)
+  if (check.error || check.addresses.length !== 1) return { error: 'Μη έγκυρο e-mail σχολείου.' }
+  return { email: check.addresses[0] }
+}
+
+ipcMain.handle('schools:add', (_e, { name, type, dyep, ty, email }) => {
   if (!name || !type) return { error: 'Συμπλήρωσε όνομα και τύπο' }
   if (!grades.SCHOOL_TYPES.includes(type)) return { error: 'Μη έγκυρος τύπος σχολείου' }
+  const em = cleanSchoolEmail(email)
+  if (em.error) return em
   try {
-    const id = db.run('INSERT INTO schools (name, type, dyep, ty) VALUES ($n, $t, $d, $ty)', {
-      $n: name,
-      $t: type,
-      $d: dyep ? 1 : 0,
-      $ty: ty ? 1 : 0,
-    })
+    const id = db.run(
+      'INSERT INTO schools (name, type, dyep, ty, email) VALUES ($n, $t, $d, $ty, $e)',
+      {
+        $n: name,
+        $t: type,
+        $d: dyep ? 1 : 0,
+        $ty: ty ? 1 : 0,
+        $e: em.email,
+      }
+    )
     return { ok: true, id }
   } catch (err) {
     return { ok: false, error: err.message }
@@ -1815,15 +2011,18 @@ ipcMain.handle('schools:delete', (_e, id) => {
   return { ok: true }
 })
 
-ipcMain.handle('schools:update', (_e, { id, name, type, dyep, ty }) => {
+ipcMain.handle('schools:update', (_e, { id, name, type, dyep, ty, email }) => {
   if (!name || !type) return { error: 'Συμπλήρωσε όνομα και τύπο' }
   if (!grades.SCHOOL_TYPES.includes(type)) return { error: 'Μη έγκυρος τύπος σχολείου' }
+  const em = cleanSchoolEmail(email)
+  if (em.error) return em
   try {
-    db.run('UPDATE schools SET name=$n, type=$t, dyep=$d, ty=$ty WHERE id=$id', {
+    db.run('UPDATE schools SET name=$n, type=$t, dyep=$d, ty=$ty, email=$e WHERE id=$id', {
       $n: name,
       $t: type,
       $d: dyep ? 1 : 0,
       $ty: ty ? 1 : 0,
+      $e: em.email,
       $id: id,
     })
   } catch (err) {

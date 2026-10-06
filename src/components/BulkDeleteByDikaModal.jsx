@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react'
 import Modal from './Modal'
 import DeleteReasonModal from './DeleteReasonModal'
 import api from '../api'
+import { notifyOutbound } from '../lib/outboundNotice'
 import { AlertTriangle } from 'lucide-react'
 
 // Κανονικοποίηση ΔΙΚΑ για αντιστοίχιση: αφαίρεση όλων των κενών (αντοχή σε typos).
@@ -21,7 +22,7 @@ function actionLabel(st) {
 
 // Μαζική διαγραφή μαθητών με βάση λίστα αριθμών ΔΙΚΑ (χωρισμένων με κόμμα).
 // Ψάχνει ΤΑΥΤΟΧΡΟΝΑ σε αφίξεις + εγγεγραμμένους — ανεξάρτητα από την καρτέλα που το άνοιξε.
-export default function BulkDeleteByDikaModal({ onClose, onDeleted }) {
+export default function BulkDeleteByDikaModal({ onClose, onDeleted, showToast }) {
   const [text, setText] = useState('')
   const [preview, setPreview] = useState(null) // { matched: [...], notFound: [...] }
   const [askReasons, setAskReasons] = useState(false) // pop-up λόγου για τους εγγεγραμμένους
@@ -86,7 +87,8 @@ export default function BulkDeleteByDikaModal({ onClose, onDeleted }) {
 
   async function deleteWithReasons(reasons) {
     if (purgeIds.length) await api.bulkPurge(purgeIds)
-    await api.bulkDelete(softIds, null, reasons)
+    const res = await api.bulkDelete(softIds, null, reasons)
+    notifyOutbound(res, showToast)
     onDeleted(preview.matched.length)
     onClose()
   }

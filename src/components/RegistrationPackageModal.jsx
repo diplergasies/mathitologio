@@ -19,7 +19,7 @@ function suggestCategory(s, packages) {
   return (packages[0] && packages[0].id) || wanted
 }
 
-export default function RegistrationPackageModal({ student, onClose }) {
+export default function RegistrationPackageModal({ student, onClose, onGenerated }) {
   const [templates, setTemplates] = useState([])
   const [schools, setSchools] = useState([])
   const [settings, setSettings] = useState({})
@@ -130,6 +130,7 @@ export default function RegistrationPackageModal({ student, onClose }) {
     })
     setBusy(false)
     setResult(res)
+    if (res && !res.error && (res.generated || []).length > 0 && onGenerated) onGenerated()
   }
 
   return (
