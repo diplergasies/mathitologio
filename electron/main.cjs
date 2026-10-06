@@ -1203,6 +1203,7 @@ ipcMain.handle('mail:test', async () => {
 ipcMain.handle('mail:check', async (_e, opts = {}) => {
   const cfg = getMailConfig()
   if (!cfg.username || !cfg.password) return { ok: true, configured: false }
+  log.info(`mail:check (${opts && opts.manual ? 'χειροκίνητος' : 'αυτόματος'})`)
   // Πρώτη χρήση (καμία εισαγωγή λίστας): προτείνονται ΟΛΕΣ οι λίστες του διαστήματος, για σωστό
   // ιστορικό αφίξεων/αποχωρήσεων. ΜΟΝΟ για άδεια βάση — αλλιώς η σειρά των λιστών θα χαλούσε.
   if (batchesCount() === 0) {

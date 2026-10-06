@@ -49,6 +49,8 @@ export default function App() {
   const emailTimerRef = useRef(null)
   const handledUidRef = useRef(null) // uid που ήδη εισήχθη ή απορρίφθηκε (να μη ξαναρωτά)
   const calFailRef = useRef(0) // συνεχόμενες αποτυχίες αυτόματου ελέγχου κανόνων ημερολογίου
+  const mailFailRef = useRef(0) // συνεχόμενες αποτυχίες αυτόματου ελέγχου νέας λίστας
+  const emailRetryRef = useRef(null) // γρήγορη επανάληψη μετά από αποτυχία (αντί αναμονής όλου του διαστήματος)
   const [updateState, setUpdateState] = useState(null) // { state, importance, version, percent }
   const updateDismissedRef = useRef(null) // έκδοση που ο χρήστης απέκρυψε (να μη ξαναενοχλεί)
   const [announcement, setAnnouncement] = useState(null) // { id, message } — μήνυμα προς χρήστες
@@ -141,13 +143,19 @@ export default function App() {
   }
 
   // Έλεγχος για νέα λίστα. manual=true → εμφανίζει και μηνύματα «δεν βρέθηκε/ήδη εισαχθεί».
+  // Επιστρέφει false αν ο έλεγχος απέτυχε (σφάλμα σύνδεσης/διακομιστή), αλλιώς true.
   async function checkEmail({ manual } = {}) {
     const res = await api.mailCheck({ manual: !!manual })
-    if (!res) return
+    if (!res) return true
     if (res.error) {
+      // Στον αυτόματο έλεγχο ειδοποίηση μία φορά, μετά από 3 συνεχόμενες αποτυχίες.
+      mailFailRef.current += 1
       if (manual) showToast(res.error, 'error')
-      return
+      else if (mailFailRef.current === 3)
+        showToast(`Ο αυτόματος έλεγχος για νέα λίστα αποτυγχάνει επανειλημμένα: ${res.error}`, 'warn')
+      return false
     }
+    mailFailRef.current = 0
     if (!res.configured) {
       if (manual) showToast('Δεν έχουν οριστεί στοιχεία e-mail στις Ρυθμίσεις.', 'warn')
       return
@@ -250,29 +258,46 @@ export default function App() {
   // οι ρυθμίσεις e-mail (emailTick).
   useEffect(() => {
     let cancelled = false
-    if (emailTimerRef.current) {
-      clearInterval(emailTimerRef.current)
-      emailTimerRef.current = null
-    }
-    api.mailGetConfig().then((cfg) => {
-      if (cancelled || !cfg) return
-      const configured = cfg.username && cfg.hasPassword
-      if (!configured || cfg.autoFreq === 'off') return
-      // Σειριακά (όχι ταυτόχρονες συνδέσεις IMAP): πρώτα λίστα, μετά κανόνες ημερολογίου.
-      const tick = async () => {
-        try { await checkEmail({ manual: false }) } catch {}
-        try { await runCalendarRules({ manual: false }) } catch {}
-      }
-      tick()
-      const ms = FREQ_MS[cfg.autoFreq]
-      if (ms) emailTimerRef.current = setInterval(tick, ms)
-    })
-    return () => {
-      cancelled = true
+    const clearTimers = () => {
       if (emailTimerRef.current) {
         clearInterval(emailTimerRef.current)
         emailTimerRef.current = null
       }
+      if (emailRetryRef.current) {
+        clearTimeout(emailRetryRef.current)
+        emailRetryRef.current = null
+      }
+    }
+    clearTimers()
+    api.mailGetConfig().then((cfg) => {
+      if (cancelled || !cfg) return
+      const configured = cfg.username && cfg.hasPassword
+      if (!configured || cfg.autoFreq === 'off') return
+      // Παροδική αποτυχία (αργό δίκτυο, ο sch.gr απορρίπτει στιγμιαία τη σύνδεση): νέα προσπάθεια
+      // σε 2' (έως 3 φορές) αντί να χαθεί όλος ο κύκλος — αλλιώς μια λίστα μπορεί να αργήσει 15'+.
+      const RETRY_MS = 2 * 60000
+      const MAX_RETRIES = 3
+      // Σειριακά (όχι ταυτόχρονες συνδέσεις IMAP): πρώτα λίστα, μετά κανόνες ημερολογίου.
+      const tick = async (attempt = 0) => {
+        if (emailRetryRef.current) {
+          clearTimeout(emailRetryRef.current)
+          emailRetryRef.current = null
+        }
+        let ok = true
+        try { ok = (await checkEmail({ manual: false })) !== false } catch { ok = false }
+        if (attempt === 0) {
+          try { await runCalendarRules({ manual: false }) } catch {}
+        }
+        if (!ok && !cancelled && attempt < MAX_RETRIES)
+          emailRetryRef.current = setTimeout(() => tick(attempt + 1), RETRY_MS)
+      }
+      tick()
+      const ms = FREQ_MS[cfg.autoFreq]
+      if (ms) emailTimerRef.current = setInterval(() => tick(), ms)
+    })
+    return () => {
+      cancelled = true
+      clearTimers()
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [emailTick])
