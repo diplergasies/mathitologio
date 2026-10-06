@@ -38,7 +38,7 @@ if (Test-Path -LiteralPath $data) {
   Write-Host "Δεν βρέθηκε φάκελος δεδομένων (θα δημιουργηθεί στην εκκίνηση): $data"
 }
 
-$branch = "cursor/outbound-pending-9d9b"
+$branch = "ekkremmotites"
 git fetch origin $branch
 if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 
