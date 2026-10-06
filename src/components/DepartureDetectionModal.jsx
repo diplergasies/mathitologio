@@ -145,7 +145,7 @@ export default function DepartureDetectionModal({ departed, onClose, onDone }) {
                 <th className="px-2 py-1.5">
                   <input type="checkbox" checked={allChecked} onChange={toggleAll} />
                 </th>
-                <th className="px-3 py-1.5 font-semibold">Μαθητής</th>
+                <th className="px-3 py-1.5 font-semibold">Όνομα</th>
                 <th className="px-3 py-1.5 font-semibold">ΔΙΚΑ</th>
                 <th className="px-3 py-1.5 font-semibold">Μονάδα</th>
                 <th className="px-3 py-1.5 font-semibold">Κατάσταση</th>
