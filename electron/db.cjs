@@ -32,6 +32,16 @@ CREATE TABLE IF NOT EXISTS schools (
   type TEXT NOT NULL
 );
 
+-- Ουρά Εκκρεμοτήτων: ενέργειες που περιμένουν έγκριση ή απέτυχαν (e-mail διαγραφής, πακέτο εγγράφων).
+CREATE TABLE IF NOT EXISTS pending_actions (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  kind TEXT NOT NULL,
+  payload TEXT NOT NULL,
+  status TEXT NOT NULL DEFAULT 'open',
+  created_at TEXT,
+  updated_at TEXT
+);
+
 CREATE TABLE IF NOT EXISTS settings (
   key TEXT PRIMARY KEY,
   value TEXT
@@ -100,6 +110,7 @@ async function init(userDataDir) {
   // Flags σχολείου για το Παρατηρητήριο (Α1.2/1.3/1.4). Ανεξάρτητα μεταξύ τους.
   ensureColumn('schools', 'dyep', 'INTEGER NOT NULL DEFAULT 0') // έχει ΔΥΕΠ
   ensureColumn('schools', 'ty', 'INTEGER NOT NULL DEFAULT 0') // λειτουργεί Τμήμα Υποδοχής
+  ensureColumn('schools', 'email', 'TEXT') // διεύθυνση για ειδοποιήσεις διαγραφής
   // Flags μαθητή (Α1.5 / Α3.1) + λόγος διαγραφής (Γ1/Γ2).
   ensureColumn('students', 'asynodeftos', "TEXT NOT NULL DEFAULT 'Όχι'")
   ensureColumn('students', 'eidiki_agogi', "TEXT NOT NULL DEFAULT 'Όχι'")
@@ -251,6 +262,8 @@ function replaceFromBuffer(buf) {
   if (db) db.close()
   db = new SQL.Database(buf)
   db.run(SCHEMA)
+  // Το CREATE IF NOT EXISTS δεν προσθέτει στήλες σε πίνακα που ήρθε από παλιό αντίγραφο.
+  ensureColumn('schools', 'email', 'TEXT')
   save()
 }
 

@@ -20,9 +20,10 @@ contextBridge.exposeInMainWorld('api', {
   setStudentColor: (ids, color) => ipcRenderer.invoke('students:setColor', { ids, color }),
 
   listSchools: () => ipcRenderer.invoke('schools:list'),
-  addSchool: (name, type, dyep, ty) => ipcRenderer.invoke('schools:add', { name, type, dyep, ty }),
-  updateSchool: (id, name, type, dyep, ty) =>
-    ipcRenderer.invoke('schools:update', { id, name, type, dyep, ty }),
+  addSchool: (name, type, dyep, ty, email) =>
+    ipcRenderer.invoke('schools:add', { name, type, dyep, ty, email }),
+  updateSchool: (id, name, type, dyep, ty, email) =>
+    ipcRenderer.invoke('schools:update', { id, name, type, dyep, ty, email }),
   deleteSchool: (id) => ipcRenderer.invoke('schools:delete', id),
 
   gradesForType: (type) => ipcRenderer.invoke('grades:forType', type),
@@ -91,6 +92,14 @@ contextBridge.exposeInMainWorld('api', {
   mailGetCalendarRules: () => ipcRenderer.invoke('mail:getCalendarRules'),
   mailSetCalendarRules: (rules) => ipcRenderer.invoke('mail:setCalendarRules', rules),
   mailRunCalendarRules: () => ipcRenderer.invoke('mail:runCalendarRules'),
+  mailGetOutboundRules: () => ipcRenderer.invoke('mail:getOutboundRules'),
+  mailSetOutboundRules: (payload) => ipcRenderer.invoke('mail:setOutboundRules', payload),
+  mailSendTest: (to) => ipcRenderer.invoke('mail:sendTest', { to }),
+
+  pendingSummary: () => ipcRenderer.invoke('pending:summary'),
+  pendingDismiss: (id) => ipcRenderer.invoke('pending:dismiss', id),
+  pendingSend: (id) => ipcRenderer.invoke('pending:send', id),
+  pendingPackageDone: (payload) => ipcRenderer.invoke('pending:packageDone', payload),
 
   // Παρατηρητήριο: αποθηκευμένα κείμενα πεδίων ανά 15νθήμερο + αποστολή σημείωσης.
   observatoryGetValues: (period) => ipcRenderer.invoke('observatory:getValues', period),

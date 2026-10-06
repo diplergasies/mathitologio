@@ -12,6 +12,7 @@ export default function Schools({ version, bump }) {
   const [type, setType] = useState('Δημοτικό')
   const [dyep, setDyep] = useState(false)
   const [ty, setTy] = useState(false)
+  const [email, setEmail] = useState('')
   const [error, setError] = useState(null)
 
   // Κατάσταση επεξεργασίας γραμμής
@@ -20,6 +21,7 @@ export default function Schools({ version, bump }) {
   const [editType, setEditType] = useState('')
   const [editDyep, setEditDyep] = useState(false)
   const [editTy, setEditTy] = useState(false)
+  const [editEmail, setEditEmail] = useState('')
 
   function load() {
     api.listSchools().then((r) => setSchools(r || []))
@@ -29,9 +31,10 @@ export default function Schools({ version, bump }) {
   async function add() {
     setError(null)
     if (!name.trim()) return
-    const res = await api.addSchool(name.trim(), type, dyep, ty)
+    const res = await api.addSchool(name.trim(), type, dyep, ty, email.trim())
     if (res && res.error) return setError(res.error)
     setName('')
+    setEmail('')
     setDyep(false)
     setTy(false)
     bump()
@@ -43,13 +46,14 @@ export default function Schools({ version, bump }) {
     setEditType(s.type)
     setEditDyep(!!s.dyep)
     setEditTy(!!s.ty)
+    setEditEmail(s.email || '')
     setError(null)
   }
 
   async function saveEdit() {
     setError(null)
     if (!editName.trim()) return
-    const res = await api.updateSchool(editId, editName.trim(), editType, editDyep, editTy)
+    const res = await api.updateSchool(editId, editName.trim(), editType, editDyep, editTy, editEmail.trim())
     if (res && res.error) return setError(res.error)
     setEditId(null)
     bump()
@@ -103,6 +107,16 @@ export default function Schools({ version, bump }) {
             <input type="checkbox" checked={ty} onChange={(e) => setTy(e.target.checked)} />
             Τμήμα Υποδοχής
           </label>
+          <div className="min-w-[200px] flex-1">
+            <label className="mb-1 block text-sm text-slate-600">E-mail</label>
+            <input
+              value={email}
+              onChange={(e) => setEmail(e.target.value)}
+              onKeyDown={(e) => e.key === 'Enter' && add()}
+              placeholder="π.χ. mail@sch.gr"
+              className="w-full rounded-md border border-slate-300 px-3 py-2 text-sm"
+            />
+          </div>
           <button
             onClick={add}
             className="inline-flex items-center gap-1 rounded-md bg-blue-600 px-3 py-2 text-sm font-medium text-white hover:bg-blue-700"
@@ -119,6 +133,7 @@ export default function Schools({ version, bump }) {
             <tr className="bg-slate-50 text-left text-slate-600">
               <th className="px-3 py-2 font-semibold">Όνομα</th>
               <th className="px-3 py-2 font-semibold">Τύπος</th>
+              <th className="px-3 py-2 font-semibold">E-mail</th>
               <th className="px-3 py-2 text-center font-semibold">ΔΥΕΠ</th>
               <th className="px-3 py-2 text-center font-semibold">Τ.Υ.</th>
               <th className="px-3 py-2 text-right font-semibold">Ενέργειες</th>
@@ -127,7 +142,7 @@ export default function Schools({ version, bump }) {
           <tbody>
             {schools.length === 0 ? (
               <tr>
-                <td colSpan={5} className="px-3 py-6 text-center text-slate-400">
+                <td colSpan={6} className="px-3 py-6 text-center text-slate-400">
                   Δεν υπάρχουν σχολεία.
                 </td>
               </tr>
@@ -155,6 +170,14 @@ export default function Schools({ version, bump }) {
                           </option>
                         ))}
                       </select>
+                    </td>
+                    <td className="px-3 py-2">
+                      <input
+                        value={editEmail}
+                        onChange={(e) => setEditEmail(e.target.value)}
+                        placeholder="mail@sch.gr"
+                        className="w-full rounded-md border border-slate-300 px-2 py-1 text-sm"
+                      />
                     </td>
                     <td className="px-3 py-2 text-center">
                       <input
@@ -195,6 +218,9 @@ export default function Schools({ version, bump }) {
                       {s.name}
                     </td>
                     <td className="px-3 py-2 text-slate-500">{s.type}</td>
+                    <td className="px-3 py-2 text-slate-500" data-selectable>
+                      {s.email || '—'}
+                    </td>
                     <td className="px-3 py-2 text-center">
                       {s.dyep ? <span className="text-green-600">✓</span> : <span className="text-slate-300">—</span>}
                     </td>

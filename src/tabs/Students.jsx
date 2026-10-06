@@ -15,6 +15,7 @@ import LastImportBadge from '../components/LastImportBadge'
 import { useSelection } from '../useSelection'
 import { birthSortValue } from '../sort'
 import { isoToDMY } from '../calendarUtils'
+import { notifyOutbound } from '../lib/outboundNotice'
 import { FileText, Trash2, Users, Hash, FileSpreadsheet, FolderArchive } from 'lucide-react'
 
 export default function Students({ version, bump, showToast }) {
@@ -277,7 +278,8 @@ export default function Students({ version, bump, showToast }) {
           message="Ο μαθητής θα μεταφερθεί στις Διαγραφές. Διάλεξε τον λόγο διαγραφής:"
           students={[delFor]}
           onConfirm={async (reasons) => {
-            await api.bulkDelete([delFor.id], null, reasons)
+            const res = await api.bulkDelete([delFor.id], null, reasons)
+            notifyOutbound(res, showToast)
             bump()
           }}
           onClose={() => setDelFor(null)}
@@ -290,7 +292,8 @@ export default function Students({ version, bump, showToast }) {
           message={`Οι ${sel.ids.length} μαθητές θα μεταφερθούν στις Διαγραφές. Διάλεξε λόγο για τον καθένα:`}
           students={students.filter((s) => sel.ids.includes(s.id))}
           onConfirm={async (reasons) => {
-            await api.bulkDelete(sel.ids, null, reasons)
+            const res = await api.bulkDelete(sel.ids, null, reasons)
+            notifyOutbound(res, showToast)
             sel.clear()
             bump()
           }}
@@ -307,6 +310,7 @@ export default function Students({ version, bump, showToast }) {
 
       {dikaDelete && (
         <BulkDeleteByDikaModal
+          showToast={showToast}
           onClose={() => setDikaDelete(false)}
           onDeleted={() => {
             sel.clear()

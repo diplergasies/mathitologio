@@ -2,6 +2,7 @@ import { useState } from 'react'
 import Modal from './Modal'
 import DeleteReasonModal from './DeleteReasonModal'
 import api from '../api'
+import { notifyOutbound } from '../lib/outboundNotice'
 import { AlertTriangle, Trash2 } from 'lucide-react'
 
 // Ετικέτα κατάστασης μαθητή για την προεπισκόπηση.
@@ -17,7 +18,7 @@ function actionLabel(st) {
 // Pop-up που ανοίγει μετά από εισαγωγή λίστας: εμφανίζει τους μαθητές που υπάρχουν στο
 // Μαθητολόγιο αλλά ΛΕΙΠΟΥΝ από τη νέα λίστα (= αποχώρησαν από τη δομή). Ο χρήστης μπορεί να
 // τους διαγράψει μαζικά ή ατομικά, τηρώντας: άφιξη -> οριστική διαγραφή, εγγεγραμμένος -> Διαγραφές.
-export default function DepartureDetectionModal({ departed, onClose, onDone }) {
+export default function DepartureDetectionModal({ departed, onClose, onDone, showToast }) {
   const [rows, setRows] = useState(departed || []) // τοπικό αντίγραφο ώστε ατομικές διαγραφές να αφαιρούν γραμμές
   const [sel, setSel] = useState(() => new Set((departed || []).map((s) => s.id))) // όλοι επιλεγμένοι by default
   const [reasonFor, setReasonFor] = useState(null) // { students, purge } προς διαγραφή με λόγο
@@ -85,7 +86,8 @@ export default function DepartureDetectionModal({ departed, onClose, onDone }) {
     const { students, purge } = reasonFor
     const soft = students.map((s) => s.id)
     if (purge.length) await api.bulkPurge(purge)
-    await api.bulkDelete(soft, null, reasons)
+    const res = await api.bulkDelete(soft, null, reasons)
+    notifyOutbound(res, showToast)
     removeRows([...purge, ...soft])
   }
 

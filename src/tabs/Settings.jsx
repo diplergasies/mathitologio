@@ -4,7 +4,7 @@ import Schools from './Schools'
 import PromotionModal from '../components/PromotionModal'
 import ResetDataModal from '../components/ResetDataModal'
 import { useConfirm } from '../components/ConfirmProvider'
-import { UserCog, Save, School, CalendarRange, GraduationCap, DatabaseBackup, FolderOpen, Play, FileText, FilePlus2, Trash2, AlertTriangle, Mail, RefreshCw, KeyRound, Search, HelpCircle, FolderArchive, Plus, CalendarPlus, BarChart3, Database, Settings2, Eye, EyeOff } from 'lucide-react'
+import { UserCog, Save, School, CalendarRange, GraduationCap, DatabaseBackup, FolderOpen, Play, FileText, FilePlus2, Trash2, AlertTriangle, Mail, RefreshCw, KeyRound, Search, HelpCircle, FolderArchive, Plus, CalendarPlus, BarChart3, Database, Settings2, Eye, EyeOff, Send } from 'lucide-react'
 import { loadPackages, defaultPackages, SIGNER_LABELS } from '../lib/registrationPackages'
 
 // Βαθμίδες με σταθερό κλειδί `type` (ίδιο με το backend) και ετικέτα εμφάνισης.
@@ -428,22 +428,10 @@ function TemplatesSection() {
   const [templates, setTemplates] = useState([])
   const [msg, setMsg] = useState(null) // { text, type }
   const [busy, setBusy] = useState(false)
-  const [promptEnabled, setPromptEnabled] = useState(false) // ερώτηση έκδοσης πακέτου μετά την εγγραφή (default OFF)
-
   function reload() {
     api.listTemplates().then((r) => setTemplates(Array.isArray(r) ? r : []))
   }
   useEffect(reload, [])
-
-  useEffect(() => {
-    api.getSettings().then((s) => setPromptEnabled(!!s && s.enrollDocsPrompt === '1'))
-  }, [])
-
-  async function togglePrompt(e) {
-    const v = e.target.checked
-    setPromptEnabled(v)
-    await api.setSettings({ enrollDocsPrompt: v ? '1' : '0' })
-  }
 
   async function add() {
     setBusy(true)
@@ -491,10 +479,9 @@ function TemplatesSection() {
         (τα ενσωματωμένα αντιγράφονται εκεί για επεξεργασία· οι αλλαγές υπερισχύουν).
       </p>
 
-      <label className="mb-3 flex cursor-pointer items-center gap-2 rounded-md border border-slate-200 bg-slate-50 p-2 text-sm text-slate-600">
-        <input type="checkbox" checked={promptEnabled} onChange={togglePrompt} />
-        Ερώτηση έκδοσης πακέτου εγγραφής μετά την εγγραφή μαθητή/μαθητών
-      </label>
+      <p className="mb-3 text-xs text-slate-400">
+        Η δημιουργία πακέτου μετά την εγγραφή ρυθμίζεται από τους εξερχόμενους κανόνες στο tab E-mail.
+      </p>
 
       <div className="mb-3 flex flex-wrap items-center gap-3">
         <button
@@ -1158,6 +1145,177 @@ function CalendarRulesSection() {
   )
 }
 
+// Εξερχόμενοι κανόνες: διαγραφή εγγεγραμμένου → e-mail στο σχολείο, εγγραφή → πακέτο εγγράφων.
+function OutboundRulesSection() {
+  const [rules, setRules] = useState([])
+  const [smtpHost, setSmtpHost] = useState('mail.sch.gr')
+  const [smtpPort, setSmtpPort] = useState('465')
+  const [username, setUsername] = useState('')
+  const [testTo, setTestTo] = useState('')
+  const [busy, setBusy] = useState(false)
+  const [msg, setMsg] = useState(null)
+
+  useEffect(() => {
+    api.mailGetOutboundRules().then((r) => {
+      if (!r) return
+      setRules(Array.isArray(r.rules) ? r.rules : [])
+      setSmtpHost(r.smtpHost || 'mail.sch.gr')
+      setSmtpPort(String(r.smtpPort || 465))
+      setUsername(r.username || '')
+    })
+  }, [])
+
+  function patch(trigger, next) {
+    setRules((prev) => prev.map((r) => (r.trigger === trigger ? { ...r, ...next } : r)))
+  }
+
+  async function save() {
+    setBusy(true)
+    setMsg(null)
+    const res = await api.mailSetOutboundRules({ rules, smtpHost, smtpPort })
+    setBusy(false)
+    if (res && res.error) return setMsg({ text: res.error, type: 'error' })
+    if (res && res.rules) setRules(res.rules)
+    setMsg({ text: 'Αποθηκεύτηκε.', type: 'ok' })
+  }
+
+  async function sendTest() {
+    setBusy(true)
+    setMsg(null)
+    const res = await api.mailSendTest(testTo.trim())
+    setBusy(false)
+    if (res && res.error) return setMsg({ text: res.error, type: 'error' })
+    setMsg({ text: 'Το δοκιμαστικό e-mail στάλθηκε.', type: 'ok' })
+  }
+
+  const inputCls = 'w-full rounded-md border border-slate-300 px-3 py-2 text-sm'
+  const deletion = rules.find((r) => r.trigger === 'student.deleted')
+  const pkg = rules.find((r) => r.trigger === 'student.enrolled')
+
+  return (
+    <div className="rounded-lg border border-slate-200 bg-white p-4">
+      <h3 className="mb-1 flex items-center gap-2 font-semibold text-slate-700">
+        <Send size={18} /> Εξερχόμενοι κανόνες
+      </h3>
+      <p className="mb-3 text-xs text-slate-400">
+        Χρησιμοποιούν τον λογαριασμό e-mail από πάνω{username ? ` (${username})` : ''}. Με «έγκριση» η
+        ενέργεια μπαίνει στην καρτέλα Εκκρεμότητες. Με «αυτόματα» γίνεται αμέσως· αν το e-mail αποτύχει,
+        μπαίνει κι αυτό στην Εκκρεμότητες. Οι κανόνες είναι κλειστοί μέχρι να τους ενεργοποιήσεις.
+      </p>
+
+      <div className="mb-3 grid grid-cols-1 gap-2 sm:grid-cols-2">
+        <label className="block">
+          <span className="mb-1 block text-xs font-medium text-slate-500">Διακομιστής SMTP</span>
+          <input value={smtpHost} onChange={(e) => setSmtpHost(e.target.value)} className={inputCls} />
+        </label>
+        <label className="block">
+          <span className="mb-1 block text-xs font-medium text-slate-500">Θύρα SMTP</span>
+          <input value={smtpPort} onChange={(e) => setSmtpPort(e.target.value)} className={inputCls} />
+        </label>
+      </div>
+
+      {deletion && (
+        <div className="mb-3 rounded-lg border border-slate-200 p-3">
+          <label className="mb-2 flex cursor-pointer items-center gap-2 text-sm text-slate-700">
+            <input
+              type="checkbox"
+              checked={deletion.enabled === true}
+              onChange={(e) => patch('student.deleted', { enabled: e.target.checked })}
+            />
+            Ειδοποίηση σχολείου όταν διαγράφεται εγγεγραμμένος μαθητής
+          </label>
+          <label className="mb-2 block text-sm text-slate-600">
+            <span className="mb-1 block text-xs font-medium text-slate-500">Λειτουργία</span>
+            <select
+              value={deletion.mode === 'auto' ? 'auto' : 'confirm'}
+              onChange={(e) => patch('student.deleted', { mode: e.target.value })}
+              className={inputCls}
+            >
+              <option value="confirm">Με έγκριση (Εκκρεμότητες)</option>
+              <option value="auto">Αυτόματα</option>
+            </select>
+          </label>
+          <label className="mb-2 block">
+            <span className="mb-1 block text-xs font-medium text-slate-500">Κοινοποίηση (προαιρετικά, με κόμμα)</span>
+            <input
+              value={deletion.cc || ''}
+              onChange={(e) => patch('student.deleted', { cc: e.target.value })}
+              placeholder="π.χ. diefthinsi@sch.gr"
+              className={inputCls}
+            />
+          </label>
+          <label className="mb-2 block">
+            <span className="mb-1 block text-xs font-medium text-slate-500">Θέμα</span>
+            <input
+              value={deletion.subject || ''}
+              onChange={(e) => patch('student.deleted', { subject: e.target.value })}
+              className={inputCls}
+            />
+          </label>
+          <label className="block">
+            <span className="mb-1 block text-xs font-medium text-slate-500">Κείμενο — {'{{school}}'} και {'{{dikas}}'}</span>
+            <textarea
+              value={deletion.body || ''}
+              onChange={(e) => patch('student.deleted', { body: e.target.value })}
+              rows={4}
+              className={inputCls}
+            />
+          </label>
+        </div>
+      )}
+
+      {pkg && (
+        <div className="mb-3 rounded-lg border border-slate-200 p-3">
+          <label className="mb-2 flex cursor-pointer items-center gap-2 text-sm text-slate-700">
+            <input
+              type="checkbox"
+              checked={pkg.enabled === true}
+              onChange={(e) => patch('student.enrolled', { enabled: e.target.checked })}
+            />
+            Δημιουργία πακέτου εγγράφων μετά την εγγραφή
+          </label>
+          <label className="block text-sm text-slate-600">
+            <span className="mb-1 block text-xs font-medium text-slate-500">Λειτουργία</span>
+            <select
+              value={pkg.mode === 'auto' ? 'auto' : 'confirm'}
+              onChange={(e) => patch('student.enrolled', { mode: e.target.value })}
+              className={inputCls}
+            >
+              <option value="confirm">Με έγκριση (Εκκρεμότητες)</option>
+              <option value="auto">Άνοιγμα αμέσως</option>
+            </select>
+          </label>
+          <p className="mt-2 text-xs text-slate-400">Τα έγγραφα μένουν σε τοπικό φάκελο. Δεν στέλνονται με e-mail.</p>
+        </div>
+      )}
+
+      <div className="flex flex-wrap items-center gap-2">
+        <button
+          onClick={save}
+          disabled={busy}
+          className="inline-flex items-center gap-1.5 rounded-md bg-blue-600 px-3 py-2 text-sm font-medium text-white hover:bg-blue-700 disabled:opacity-40"
+        >
+          <Save size={16} /> Αποθήκευση
+        </button>
+        <input
+          value={testTo}
+          onChange={(e) => setTestTo(e.target.value)}
+          placeholder="Δοκιμή προς…"
+          className="w-48 rounded-md border border-slate-300 px-3 py-2 text-sm"
+        />
+        <button
+          onClick={sendTest}
+          disabled={busy || !testTo.trim()}
+          className="inline-flex items-center gap-1.5 rounded-md border border-slate-300 px-3 py-2 text-sm text-slate-600 hover:bg-slate-50 disabled:opacity-40"
+        >
+          <Send size={16} /> Δοκιμαστική αποστολή
+        </button>
+        {msg && <span className={`text-sm ${msg.type === 'error' ? 'text-red-600' : 'text-green-600'}`}>{msg.text}</span>}
+      </div>
+    </div>
+  )
+}
+
 // Ενότητα ενημερώσεων (πειραματικό): τρέχουσα έκδοση, διακόπτης αυτόματου ελέγχου, «Έλεγχος τώρα».
 function UpdateSection() {
   const [msg, setMsg] = useState('')
@@ -1352,6 +1510,7 @@ export default function Settings({ version, bump, emailCheck, onEmailConfigChang
       <div className={pane('email')}>
         <EmailImportSection emailCheck={emailCheck} onEmailConfigChange={onEmailConfigChange} />
         <CalendarRulesSection />
+        <OutboundRulesSection />
       </div>
 
       <div className={pane('docs')}>
