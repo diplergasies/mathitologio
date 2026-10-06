@@ -94,7 +94,7 @@
     },
     "publish": {
       "provider": "github",
-      "owner": "diplergasies",
+      "owner": "katsanx",
       "repo": "mathitologio",
       "private": false,
       "releaseType": "release"

@@ -28,7 +28,7 @@ try {
 
 const isDev = !!process.env.VITE_DEV_SERVER_URL
 
-const OWNER = 'diplergasies'
+const OWNER = 'katsanx'
 const REPO = 'mathitologio'
 const CHECK_INTERVAL_MS = 6 * 60 * 60 * 1000 // ~6 ώρες
 
