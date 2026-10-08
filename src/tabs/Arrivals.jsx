@@ -9,9 +9,9 @@ import ManualArrivalModal from '../components/ManualArrivalModal'
 import EnrollDocsPrompt from '../components/EnrollDocsPrompt'
 import RegistrationPackageModal from '../components/RegistrationPackageModal'
 import StudentNoteModal from '../components/StudentNoteModal'
-import DeleteReasonModal from '../components/DeleteReasonModal'
 import LastImportBadge from '../components/LastImportBadge'
 import { useSelection } from '../useSelection'
+import { useConfirm } from '../components/ConfirmProvider'
 import { birthSortValue, proposedSortValue } from '../sort'
 import { GraduationCap, Trash2, Users, Hash, UserPlus } from 'lucide-react'
 
@@ -25,8 +25,8 @@ export default function Arrivals({ version, bump, showToast }) {
   const [pkgQueue, setPkgQueue] = useState([]) // ουρά μαθητών για έκδοση πακέτου εγγραφής
   const [pkgIndex, setPkgIndex] = useState(0) // τρέχων μαθητής στην ουρά
   const [noteFor, setNoteFor] = useState(null)
-  const [delList, setDelList] = useState(null) // μαθητές προς διαγραφή (pop-up λόγου)
   const sel = useSelection()
+  const confirm = useConfirm()
 
   function load() {
     api.listStudents('arrival').then((r) => setStudents(r || []))
@@ -114,13 +114,21 @@ export default function Arrivals({ version, bump, showToast }) {
     if (promptOn) setEnrolledForDocs([s])
   }
 
-  // Διαγραφή (μία ή μαζική): ανοίγει το pop-up λόγου διαγραφής ανά μαθητή.
-  function del(s) {
-    setDelList([s])
-  }
-
-  function bulkDelete() {
-    setDelList(students.filter((s) => sel.ids.includes(s.id)))
+  // Διαγραφή άφιξης: χωρίς λόγο, πάει στις Διαγραφές → Αφίξεις. Η ημ. άφιξης μένει.
+  async function deleteArrivals(list) {
+    if (!list.length) return
+    const who = `${list[0].eponymo || ''} ${list[0].onoma || ''}`.trim()
+    const ok = await confirm({
+      message:
+        list.length > 1
+          ? `Οι ${list.length} αφίξεις θα μεταφερθούν στις Διαγραφές → Αφίξεις.`
+          : `Η άφιξη${who ? ` ${who}` : ''} θα μεταφερθεί στις Διαγραφές → Αφίξεις.`,
+      confirmLabel: 'Διαγραφή',
+    })
+    if (!ok) return
+    await api.bulkDelete(list.map((s) => s.id))
+    sel.toggleAll(list.map((s) => s.id), false)
+    bump()
   }
 
   async function saveCell(id, key, value) {
@@ -168,7 +176,7 @@ export default function Arrivals({ version, bump, showToast }) {
               <GraduationCap size={14} /> Μαζική εγγραφή
             </button>
             <button
-              onClick={bulkDelete}
+              onClick={() => deleteArrivals(students.filter((s) => sel.ids.includes(s.id)))}
               className="inline-flex items-center gap-1 rounded-md border border-red-300 bg-white px-2.5 py-1 text-xs font-medium text-red-600 hover:bg-red-50"
             >
               <Trash2 size={14} /> Μαζική διαγραφή
@@ -200,7 +208,7 @@ export default function Arrivals({ version, bump, showToast }) {
               <GraduationCap size={14} /> Εγγραφή
             </button>
             <button
-              onClick={() => del(s)}
+              onClick={() => deleteArrivals([s])}
               title="Διαγραφή"
               className="rounded-md border border-red-200 p-1 text-red-600 hover:bg-red-50"
             >
@@ -209,24 +217,6 @@ export default function Arrivals({ version, bump, showToast }) {
           </>
         )}
       />
-
-      {delList && (
-        <DeleteReasonModal
-          title={delList.length > 1 ? 'Μαζική διαγραφή' : 'Διαγραφή μαθητή'}
-          message={
-            delList.length > 1
-              ? `Οι ${delList.length} αφίξεις θα μεταφερθούν στις Διαγραφές. Διάλεξε λόγο για τον καθένα:`
-              : 'Η άφιξη θα μεταφερθεί στις Διαγραφές. Διάλεξε τον λόγο διαγραφής:'
-          }
-          students={delList}
-          onConfirm={async (reasons) => {
-            await api.bulkDelete(delList.map((s) => s.id), null, reasons)
-            if (delList.length > 1) sel.clear()
-            bump()
-          }}
-          onClose={() => setDelList(null)}
-        />
-      )}
 
       {noteFor && (
         <StudentNoteModal

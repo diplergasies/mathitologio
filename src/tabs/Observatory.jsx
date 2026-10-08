@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from 'react'
 import api from '../api'
 import CopyButton from '../components/CopyButton'
-import { ClipboardList, Layers, School, Accessibility, UserMinus, Activity, UserRound, GraduationCap, Handshake, Building2, Users, BookOpen, Megaphone, MessageSquareText } from 'lucide-react'
+import { ClipboardList, Layers, School, Accessibility, UserMinus, Activity, UserRound, GraduationCap, Handshake, Building2, Users, BookOpen, Megaphone, MessageSquareText, Timer } from 'lucide-react'
 import { OBS_SECTIONS, periodKey } from '../lib/observatoryFields'
 
 // Εικονίδιο ανά ενότητα επεξεργάσιμων πεδίων.
@@ -38,7 +38,7 @@ function buildA1Text(data) {
   }
   lines.push(`Σύνολο νέων εγγραφών: ${data.total}`)
 
-  // Διαγραφές της περιόδου — ΟΛΕΣ (ανεξάρτητα από το πότε έγινε η εγγραφή), ανά βαθμίδα &
+  // Διαγραφές της περιόδου — μόνο εγγεγραμμένοι μαθητές (όχι αφίξεις), ανά βαθμίδα &
   // σχολείο, με την ίδια μορφή όπως οι εγγραφές (χωρίς ονόματα/ΔΙΚΑ).
   const diagr = (n) => `${n} ${n === 1 ? 'διαγραφή' : 'διαγραφές'}`
   lines.push('')
@@ -62,6 +62,96 @@ function buildA1Text(data) {
 
 // Γ3 — λόγοι διακοπής φοίτησης, ομαδοποιημένοι με πλήθος (χωρίς προσωπικά στοιχεία).
 // π.χ. «Αποχώρηση από την δομή (3 μαθητές) - Άτυπη φυγή (1 μαθητής)».
+// «12,5 ημέρες» — ακέραιος χωρίς δεκαδικό, αλλιώς ένα δεκαδικό.
+function fmtDays(n) {
+  if (n == null || !Number.isFinite(n)) return '—'
+  const rounded = Math.round(n * 10) / 10
+  const text = rounded.toLocaleString('el-GR', {
+    minimumFractionDigits: Number.isInteger(rounded) ? 0 : 1,
+    maximumFractionDigits: 1,
+  })
+  return `${text} ${rounded === 1 ? 'ημέρα' : 'ημέρες'}`
+}
+
+function buildAttendanceText(block, heading) {
+  const schools = (block && block.bySchool) || []
+  if (!schools.length) return 'Δεν υπάρχουν μαθητές με ημερομηνία εγγραφής.'
+  const line = (name, row) =>
+    `${name}: μέσος όρος ${fmtDays(row.meanDays)}, διάμεσος ${fmtDays(row.medianDays)}`
+  const lines = [`${heading}`]
+  for (const s of schools) lines.push(line(s.type ? `${s.name} (${s.type})` : s.name, s))
+  if (block.overall && block.overall.count) lines.push(line('Σύνολο', block.overall))
+  return lines.join('\n')
+}
+
+function AttendancePanel({ months, byPeriod }) {
+  const [sel, setSel] = useState('all')
+  const known = sel === 'all' || (months || []).some((m) => m.key === sel)
+  const key = known ? sel : 'all'
+  const block = (byPeriod && byPeriod[key]) || { bySchool: [], overall: null }
+  const label = key === 'all' ? 'Συνολικά' : ((months || []).find((m) => m.key === key) || {}).label || key
+  const schools = block.bySchool || []
+
+  return (
+    <Section icon={Timer} title="Χρόνος φοίτησης ανά σχολείο">
+      <div className="flex items-center justify-between gap-2 px-3 pt-3">
+        <select
+          value={key}
+          onChange={(e) => setSel(e.target.value)}
+          aria-label="Μήνας χρόνου φοίτησης"
+          className="rounded-md border border-slate-300 px-2 py-1.5 text-sm"
+        >
+          <option value="all">Συνολικά</option>
+          {(months || []).map((m) => (
+            <option key={m.key} value={m.key}>{m.label}</option>
+          ))}
+        </select>
+        <CopyButton value={buildAttendanceText(block, label)} />
+      </div>
+      <p className="px-3 pt-2 text-xs text-slate-400">
+        {key === 'all'
+          ? 'Μέσος όρος και διάμεσος για όλους τους διαθέσιμους μήνες: από την εγγραφή έως τη διαγραφή, ή έως σήμερα για όσους είναι ακόμη εγγεγραμμένοι.'
+          : `Μόνο οι ημέρες φοίτησης μέσα στον ${label}.`}
+        {' '}Μαθητές που διαγράφηκαν από τις Αφίξεις χωρίς εγγραφή δεν μετράνε.
+      </p>
+      {schools.length === 0 ? (
+        <p className="px-3 py-3 text-sm text-slate-400">Δεν υπάρχουν μαθητές με ημερομηνία εγγραφής.</p>
+      ) : (
+        <div className="overflow-x-auto px-3 py-3">
+          <table className="w-full border-collapse text-sm">
+            <thead>
+              <tr className="border-b border-slate-200 text-left text-xs text-slate-500">
+                <th className="py-1.5 pr-3 font-medium">Σχολείο</th>
+                <th className="py-1.5 pr-3 text-right font-medium">Μέσος όρος</th>
+                <th className="py-1.5 text-right font-medium">Διάμεσος</th>
+              </tr>
+            </thead>
+            <tbody>
+              {schools.map((s) => (
+                <tr key={`${s.type}:${s.name}`} className="border-b border-slate-100">
+                  <td className="py-1.5 pr-3 text-slate-700">
+                    {s.name}
+                    {s.type ? <span className="mt-0.5 block text-xs font-normal text-slate-400">{s.type}</span> : null}
+                  </td>
+                  <td className="py-1.5 pr-3 text-right tabular-nums text-slate-700">{fmtDays(s.meanDays)}</td>
+                  <td className="py-1.5 text-right tabular-nums text-slate-700">{fmtDays(s.medianDays)}</td>
+                </tr>
+              ))}
+              {block.overall && block.overall.count > 0 && (
+                <tr className="font-medium text-slate-800">
+                  <td className="py-1.5 pr-3">Σύνολο</td>
+                  <td className="py-1.5 pr-3 text-right tabular-nums">{fmtDays(block.overall.meanDays)}</td>
+                  <td className="py-1.5 text-right tabular-nums">{fmtDays(block.overall.medianDays)}</td>
+                </tr>
+              )}
+            </tbody>
+          </table>
+        </div>
+      )}
+    </Section>
+  )
+}
+
 function buildDropoutText(data) {
   const reasons = data.dropoutReasons || []
   if (!reasons.length) return 'Λόγος διακοπής: —'
@@ -199,7 +289,8 @@ export default function Observatory({ version }) {
   for (let y = now.getFullYear() + 1; y >= now.getFullYear() - 5; y--) years.push(y)
 
   return (
-    <div className="max-w-3xl space-y-5">
+    <div className="grid grid-cols-1 items-start gap-5 xl:grid-cols-[minmax(0,48rem)_minmax(18rem,32rem)]">
+    <div className="min-w-0 space-y-5">
       {/* Επιλογή περιόδου */}
       <div className="flex flex-wrap items-end gap-3 rounded-lg border border-slate-200 bg-white p-4">
         <div className="flex items-center gap-2">
@@ -300,6 +391,11 @@ export default function Observatory({ version }) {
       </Section>
 
       {['D1', 'D2', 'E', 'ST', 'Z', 'TH'].map((id) => renderSection(id))}
+    </div>
+
+    <aside className="sticky top-0 min-w-0 xl:max-h-[calc(100vh-7.5rem)] xl:overflow-auto">
+      <AttendancePanel months={data.attendanceMonths} byPeriod={data.attendanceByPeriod} />
+    </aside>
     </div>
   )
 

@@ -14,9 +14,8 @@ function statusLabel(st) {
   return st === 'arrival' ? 'Άφιξη' : st === 'enrolled' ? 'Εγγεγραμμένος' : st || '—'
 }
 
-// Τι θα συμβεί ανά μαθητή: οι αφίξεις διαγράφονται οριστικά, οι εγγεγραμμένοι πάνε στις Διαγραφές.
 function actionLabel(st) {
-  return st === 'arrival' ? 'Οριστική διαγραφή' : 'Στις Διαγραφές'
+  return st === 'arrival' ? 'Διαγραφές / Αφίξεις' : 'Διαγραφές / Μαθητές'
 }
 
 // Μαζική διαγραφή μαθητών με βάση λίστα αριθμών ΔΙΚΑ (χωρισμένων με κόμμα).
@@ -67,26 +66,25 @@ export default function BulkDeleteByDikaModal({ onClose, onDeleted }) {
     setPreview({ matched, notFound })
   }
 
-  // Αφίξεις -> οριστική διαγραφή (purge)· εγγεγραμμένοι -> μαλακή διαγραφή (καρτέλα Διαγραφές).
-  const purgeIds = preview ? preview.matched.filter((s) => s.status === 'arrival').map((s) => s.id) : []
-  const softIds = preview ? preview.matched.filter((s) => s.status === 'enrolled').map((s) => s.id) : []
+  // Αφίξεις → Διαγραφές/Αφίξεις χωρίς λόγο. Εγγεγραμμένοι → Διαγραφές/Μαθητές με λόγο.
+  const arrivalIds = preview ? preview.matched.filter((s) => s.status === 'arrival').map((s) => s.id) : []
+  const enrolledIds = preview ? preview.matched.filter((s) => s.status === 'enrolled').map((s) => s.id) : []
 
-  // Αν υπάρχουν εγγεγραμμένοι, πρώτα pop-up λόγου ανά μαθητή· αλλιώς κατευθείαν οριστική διαγραφή.
   async function confirmDelete() {
-    if (softIds.length) {
+    if (enrolledIds.length) {
       setAskReasons(true)
       return
     }
     setBusy(true)
-    if (purgeIds.length) await api.bulkPurge(purgeIds)
+    if (arrivalIds.length) await api.bulkDelete(arrivalIds)
     setBusy(false)
     onDeleted(preview.matched.length)
     onClose()
   }
 
   async function deleteWithReasons(reasons) {
-    if (purgeIds.length) await api.bulkPurge(purgeIds)
-    await api.bulkDelete(softIds, null, reasons)
+    if (arrivalIds.length) await api.bulkDelete(arrivalIds)
+    await api.bulkDelete(enrolledIds, null, reasons)
     onDeleted(preview.matched.length)
     onClose()
   }
@@ -122,9 +120,7 @@ export default function BulkDeleteByDikaModal({ onClose, onDeleted }) {
       >
         {busy
           ? 'Γίνεται…'
-          : purgeIds.length && softIds.length
-            ? `Διαγραφή ${preview.matched.length} (${purgeIds.length} οριστικά, ${softIds.length} στις Διαγραφές)`
-            : `Διαγραφή ${preview.matched.length} μαθητών`}
+          : `Διαγραφή ${preview.matched.length} μαθητών`}
       </button>
     </>
   )
@@ -134,9 +130,9 @@ export default function BulkDeleteByDikaModal({ onClose, onDeleted }) {
       <DeleteReasonModal
         title="Λόγος διαγραφής"
         message={
-          softIds.length > 1
-            ? `Οι ${softIds.length} εγγεγραμμένοι μαθητές θα μεταφερθούν στις Διαγραφές. Διάλεξε λόγο για τον καθένα:`
-            : 'Ο μαθητής θα μεταφερθεί στις Διαγραφές. Διάλεξε τον λόγο διαγραφής:'
+          enrolledIds.length > 1
+            ? `Οι ${enrolledIds.length} εγγεγραμμένοι θα μεταφερθούν στις Διαγραφές → Μαθητές. Διάλεξε λόγο για τον καθένα:`
+            : 'Ο μαθητής θα μεταφερθεί στις Διαγραφές → Μαθητές. Διάλεξε τον λόγο διαγραφής:'
         }
         students={preview.matched.filter((s) => s.status === 'enrolled')}
         onConfirm={deleteWithReasons}
@@ -153,10 +149,10 @@ export default function BulkDeleteByDikaModal({ onClose, onDeleted }) {
             Επικόλλησε τους αριθμούς <strong>ΔΙΚΑ</strong> των μαθητών, χωρισμένους με κόμμα (,). Η
             αναζήτηση καλύπτει <strong>και τις Αφίξεις και τους Μαθητές</strong>.
           </p>
-          <p className="rounded-md bg-amber-50 p-2 text-xs text-amber-700">
-            Οι <strong>αφίξεις</strong> διαγράφονται <strong>οριστικά</strong> (δεν πηγαίνουν στις
-            Διαγραφές, δεν επαναφέρονται). Οι <strong>εγγεγραμμένοι</strong> πηγαίνουν στην καρτέλα
-            <strong> Διαγραφές</strong> (με δυνατότητα επαναφοράς).
+          <p className="rounded-md bg-slate-50 p-2 text-xs text-slate-600">
+            Οι <strong>αφίξεις</strong> πηγαίνουν στις <strong>Διαγραφές → Αφίξεις</strong> (χωρίς λόγο).
+            Οι <strong>εγγεγραμμένοι</strong> πηγαίνουν στις <strong>Διαγραφές → Μαθητές</strong> και
+            ζητείται λόγος διαγραφής.
           </p>
           <textarea
             value={text}
@@ -193,13 +189,7 @@ export default function BulkDeleteByDikaModal({ onClose, onDeleted }) {
                         <td className="px-3 py-1.5 text-slate-600">{s.dika || '—'}</td>
                         <td className="px-3 py-1.5 text-slate-500">{s.monada || '—'}</td>
                         <td className="px-3 py-1.5 text-slate-500">{statusLabel(s.status)}</td>
-                        <td
-                          className={`px-3 py-1.5 ${
-                            s.status === 'arrival' ? 'font-medium text-red-600' : 'text-slate-500'
-                          }`}
-                        >
-                          {actionLabel(s.status)}
-                        </td>
+                        <td className="px-3 py-1.5 text-slate-500">{actionLabel(s.status)}</td>
                       </tr>
                     ))}
                   </tbody>
@@ -212,16 +202,16 @@ export default function BulkDeleteByDikaModal({ onClose, onDeleted }) {
             </p>
           )}
 
-          {purgeIds.length > 0 && softIds.length === 0 && (
+          {arrivalIds.length > 0 && enrolledIds.length === 0 && (
             <p className="rounded-md bg-slate-50 p-2 text-xs text-slate-500">
-              Όλοι οι επιλεγμένοι είναι <strong>αφίξεις</strong> και διαγράφονται{' '}
-              <strong>οριστικά</strong> — δεν καταχωρείται λόγος αποχώρησης.
+              Οι αφίξεις πηγαίνουν στις <strong>Διαγραφές → Αφίξεις</strong> χωρίς λόγο διαγραφής.
             </p>
           )}
 
-          {softIds.length > 0 && (
+          {enrolledIds.length > 0 && (
             <p className="text-xs text-slate-500">
-              Για όσους πάνε στις Διαγραφές θα σου ζητηθεί στη συνέχεια ο λόγος διαγραφής.
+              Για τους εγγεγραμμένους θα ζητηθεί στη συνέχεια ο λόγος διαγραφής. Οι αφίξεις, αν υπάρχουν,
+              μεταφέρονται χωρίς λόγο.
             </p>
           )}
 
