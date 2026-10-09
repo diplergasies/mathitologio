@@ -99,6 +99,19 @@ export default function PromotionModal({ onClose, onDone }) {
               Απόφοιτοι (μεταφέρθηκαν στις Διαγραφές): <strong>{result.graduated}</strong>.
             </p>
           )}
+          {result.outbound && result.outbound.queued > 0 && (
+            <p className="rounded-md bg-amber-50 p-2 text-amber-700">
+              Ειδοποιήσεις διαγραφής αποφοίτων στην καρτέλα Εκκρεμότητες: <strong>{result.outbound.queued}</strong>.
+            </p>
+          )}
+          {result.outbound && result.outbound.sent > 0 && (
+            <p className="rounded-md bg-green-50 p-2 text-green-700">
+              Στάλθηκαν e-mail διαγραφής στα σχολεία: <strong>{result.outbound.sent}</strong>.
+            </p>
+          )}
+          {result.outbound && result.outbound.errors && result.outbound.errors.length > 0 && (
+            <p className="rounded-md bg-red-50 p-2 text-red-700">{result.outbound.errors[0]}</p>
+          )}
           {result.needSchool > 0 && (
             <p className="rounded-md bg-amber-50 p-2 text-amber-700">
               Χρειάζονται νέο σχολείο (άλλαξαν βαθμίδα): <strong>{result.needSchool}</strong> — επίλεξέ

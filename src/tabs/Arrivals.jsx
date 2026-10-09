@@ -6,13 +6,13 @@ import GradeCell from '../components/GradeCell'
 import BulkEnrollModal from '../components/BulkEnrollModal'
 import BulkDeleteByDikaModal from '../components/BulkDeleteByDikaModal'
 import ManualArrivalModal from '../components/ManualArrivalModal'
-import EnrollDocsPrompt from '../components/EnrollDocsPrompt'
 import RegistrationPackageModal from '../components/RegistrationPackageModal'
 import StudentNoteModal from '../components/StudentNoteModal'
 import DeleteReasonModal from '../components/DeleteReasonModal'
 import LastImportBadge from '../components/LastImportBadge'
 import { useSelection } from '../useSelection'
 import { birthSortValue, proposedSortValue } from '../sort'
+import { notifyOutbound } from '../lib/outboundNotice'
 import { GraduationCap, Trash2, Users, Hash, UserPlus } from 'lucide-react'
 
 export default function Arrivals({ version, bump, showToast }) {
@@ -20,9 +20,7 @@ export default function Arrivals({ version, bump, showToast }) {
   const [bulkEnroll, setBulkEnroll] = useState(false)
   const [dikaDelete, setDikaDelete] = useState(false)
   const [manual, setManual] = useState(false)
-  const [promptOn, setPromptOn] = useState(false) // ρύθμιση: ερώτηση έκδοσης πακέτου μετά την εγγραφή (default OFF)
-  const [enrolledForDocs, setEnrolledForDocs] = useState([]) // ερώτηση για αυτούς
-  const [pkgQueue, setPkgQueue] = useState([]) // ουρά μαθητών για έκδοση πακέτου εγγραφής
+  const [pkgQueue, setPkgQueue] = useState([]) // ουρά μαθητών για έκδοση πακέτου εγγραφής (κανόνας «αυτόματα»)
   const [pkgIndex, setPkgIndex] = useState(0) // τρέχων μαθητής στην ουρά
   const [noteFor, setNoteFor] = useState(null)
   const [delList, setDelList] = useState(null) // μαθητές προς διαγραφή (pop-up λόγου)
@@ -32,10 +30,6 @@ export default function Arrivals({ version, bump, showToast }) {
     api.listStudents('arrival').then((r) => setStudents(r || []))
   }
   useEffect(load, [version])
-
-  useEffect(() => {
-    api.getSettings().then((s) => setPromptOn(!!s && s.enrollDocsPrompt === '1'))
-  }, [])
 
   const notifyError = (m) => showToast && showToast(m, 'error')
 
@@ -111,7 +105,10 @@ export default function Arrivals({ version, bump, showToast }) {
       return
     }
     bump()
-    if (promptOn) setEnrolledForDocs([s])
+    if (res && res.packageMode === 'auto') {
+      setPkgQueue([s])
+      setPkgIndex(0)
+    }
   }
 
   // Διαγραφή (μία ή μαζική): ανοίγει το pop-up λόγου διαγραφής ανά μαθητή.
@@ -220,7 +217,8 @@ export default function Arrivals({ version, bump, showToast }) {
           }
           students={delList}
           onConfirm={async (reasons) => {
-            await api.bulkDelete(delList.map((s) => s.id), null, reasons)
+            const res = await api.bulkDelete(delList.map((s) => s.id), null, reasons)
+            notifyOutbound(res, showToast)
             if (delList.length > 1) sel.clear()
             bump()
           }}
@@ -246,13 +244,17 @@ export default function Arrivals({ version, bump, showToast }) {
             const objs = students.filter((s) => enrolledIds.includes(s.id))
             sel.clear()
             bump()
-            if (promptOn && objs.length) setEnrolledForDocs(objs)
+            if (res && res.packageMode === 'auto' && objs.length) {
+              setPkgQueue(objs)
+              setPkgIndex(0)
+            }
           }}
         />
       )}
 
       {dikaDelete && (
         <BulkDeleteByDikaModal
+          showToast={showToast}
           onClose={() => setDikaDelete(false)}
           onDeleted={() => {
             sel.clear()
@@ -268,19 +270,7 @@ export default function Arrivals({ version, bump, showToast }) {
         />
       )}
 
-      {enrolledForDocs.length > 0 && (
-        <EnrollDocsPrompt
-          students={enrolledForDocs}
-          onClose={() => setEnrolledForDocs([])}
-          onYes={() => {
-            setPkgQueue(enrolledForDocs)
-            setPkgIndex(0)
-            setEnrolledForDocs([])
-          }}
-        />
-      )}
-
-      {/* Έκδοση πακέτου εγγραφής ανά μαθητή, διαδοχικά: κλείσιμο του ενός → άνοιγμα του επόμενου. */}
+      {/* Έκδοση πακέτου εγγραφής ανά μαθητή, όταν ο κανόνας είναι «αυτόματα». */}
       {pkgQueue[pkgIndex] && (
         <RegistrationPackageModal
           key={pkgQueue[pkgIndex].id}

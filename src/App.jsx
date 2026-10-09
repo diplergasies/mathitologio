@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from 'react'
 import api from './api'
+import Pending from './tabs/Pending'
 import Arrivals from './tabs/Arrivals'
 import Students from './tabs/Students'
 import Deletions from './tabs/Deletions'
@@ -16,13 +17,14 @@ import EmailBulkPromptModal from './components/EmailBulkPromptModal'
 import AnnouncementModal from './components/AnnouncementModal'
 import UpdateBanner from './components/UpdateBanner'
 import { useConfirm } from './components/ConfirmProvider'
-import { Upload, FileText, Download, Database, PlaneLanding, Users, Trash2, Settings as SettingsIcon, BarChart3, ClipboardList, CalendarDays, BookOpen, HelpCircle, MessageSquare } from 'lucide-react'
+import { Upload, FileText, Download, Database, PlaneLanding, Users, Trash2, Settings as SettingsIcon, BarChart3, ClipboardList, CalendarDays, BookOpen, HelpCircle, MessageSquare, ListTodo } from 'lucide-react'
 
 // Ορατή στον χρήστη έκδοση = μόνο major.minor (π.χ. «1.6»). Οι σιωπηλές ενημερώσεις αυξάνουν
 // μόνο το 3ο ψηφίο, ώστε ο χρήστης να ΜΗ βλέπει αλλαγή· η πλήρης έκδοση μένει στις Ρυθμίσεις.
 const shortVer = (v) => (v ? String(v).split('.').slice(0, 2).join('.') : '')
 
 const TABS = [
+  { id: 'pending', label: 'Εκκρεμότητες', icon: ListTodo, Comp: Pending },
   { id: 'arrivals', label: 'Αφίξεις', icon: PlaneLanding, Comp: Arrivals },
   { id: 'students', label: 'Μαθητές', icon: Users, Comp: Students },
   { id: 'deletions', label: 'Διαγραφές', icon: Trash2, Comp: Deletions },
@@ -54,9 +56,14 @@ export default function App() {
   const [updateState, setUpdateState] = useState(null) // { state, importance, version, percent }
   const updateDismissedRef = useRef(null) // έκδοση που ο χρήστης απέκρυψε (να μη ξαναενοχλεί)
   const [announcement, setAnnouncement] = useState(null) // { id, message } — μήνυμα προς χρήστες
+  const [pendingCount, setPendingCount] = useState(0)
 
   const [settingsSub, setSettingsSub] = useState(null) // αρχικό υπο-tab Ρυθμίσεων (π.χ. 1η εκκίνηση)
   const bump = () => setVersion((v) => v + 1)
+
+  useEffect(() => {
+    api.pendingSummary().then((s) => setPendingCount((s && s.count) || 0))
+  }, [version])
 
   useEffect(() => {
     api.appInfo().then((i) => {
@@ -395,6 +402,11 @@ export default function App() {
               }`}
             >
               <Icon size={16} /> {t.label}
+              {t.id === 'pending' && pendingCount > 0 && (
+                <span className="rounded-full bg-blue-600 px-1.5 text-xs font-semibold text-white">
+                  {pendingCount > 99 ? '99+' : pendingCount}
+                </span>
+              )}
             </button>
           )
         })}
@@ -415,6 +427,7 @@ export default function App() {
             emailCheck={() => checkEmail({ manual: true })}
             onEmailConfigChange={() => setEmailTick((t) => t + 1)}
             initialSubTab={settingsSub}
+            onOpenTab={setTab}
           />
         )}
       </main>
@@ -447,6 +460,7 @@ export default function App() {
           departed={departures}
           onClose={() => setDepartures(null)}
           onDone={bump}
+          showToast={showToast}
         />
       )}
 
