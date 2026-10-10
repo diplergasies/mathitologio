@@ -70,6 +70,10 @@
       {
         "from": "README.md",
         "to": "README.md"
+      },
+      {
+        "from": "build/EULA.txt",
+        "to": "EULA.txt"
       }
     ],
     "win": {
@@ -90,8 +94,7 @@
       "allowToChangeInstallationDirectory": true,
       "createDesktopShortcut": true,
       "createStartMenuShortcut": true,
-      "shortcutName": "Μαθητολόγιο ΣΕΠ",
-      "license": "build/EULA.txt"
+      "shortcutName": "Μαθητολόγιο ΣΕΠ"
     },
     "publish": {
       "provider": "github",
