@@ -282,3 +282,8 @@ npm run dist     # δημιουργία installer .exe (Windows) στο release/
 ---
 
 *Δημιουργήθηκε από τους ΣΕΠ της ΕΔΠΦΑΑ Δράμας, σχ. έτος 2025-2026.*
+
+## License & Terms of Use
+This project is **Source-Available** for viewing purposes only. All rights reserved.
+Redistribution, copying, or commercial use is strictly prohibited.
+See the [LICENSE](LICENSE) file for full details.

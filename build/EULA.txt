@@ -1,0 +1,21 @@
+END USER LICENSE AGREEMENT (EULA)
+
+Software Name: Μαθητολόγιο ΣΕΠ
+Copyright (c) 2026 Κατσιαντρίδης Χρήστος
+
+IMPORTANT - READ CAREFULLY:
+By installing or using this software, you agree to be bound by the terms of this agreement.
+
+1. GRANT OF LICENSE:
+This software is provided to you free of charge for personal use only. The author retains full ownership and intellectual property rights of the software and its binaries.
+
+2. RESTRICTIONS:
+- You may NOT redistribute, resell, lease, or rent this executable software (.exe) to third parties.
+- You may NOT reverse engineer, decompile, or disassemble the executable.
+- You may NOT re-package this software into other installers or distribution platforms.
+
+3. CHANGES TO TERMS & COMMERCIALIZATION:
+The author reserves the right to modify, discontinue, or turn this software into a paid product at any time without prior notice.
+
+4. CONTACT:
+For permissions or commercial inquiries, contact: katsanx@gmail.com

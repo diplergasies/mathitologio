@@ -4,7 +4,7 @@
   "version": "2.19.0",
   "description": "Ψηφιακό Μαθητολόγιο — διαχείριση μαθητικού πληθυσμού δομής φιλοξενίας",
   "author": "Κατσιαντρίδης Χρήστος",
-  "license": "UNLICENSED",
+  "license": "SEE LICENSE IN LICENSE",
   "private": true,
   "type": "module",
   "main": "electron/main.cjs",
@@ -90,7 +90,8 @@
       "allowToChangeInstallationDirectory": true,
       "createDesktopShortcut": true,
       "createStartMenuShortcut": true,
-      "shortcutName": "Μαθητολόγιο ΣΕΠ"
+      "shortcutName": "Μαθητολόγιο ΣΕΠ",
+      "license": "build/EULA.txt"
     },
     "publish": {
       "provider": "github",
