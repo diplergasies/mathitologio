@@ -2334,6 +2334,60 @@ function levelOf(category) {
 function emptyCounts() {
   return { male: 0, female: 0, other: 0, total: 0 }
 }
+
+function meanOf(nums) {
+  if (!nums.length) return null
+  return nums.reduce((s, n) => s + n, 0) / nums.length
+}
+
+function medianOf(nums) {
+  if (!nums.length) return null
+  const a = [...nums].sort((x, y) => x - y)
+  const mid = Math.floor(a.length / 2)
+  return a.length % 2 ? a[mid] : (a[mid - 1] + a[mid]) / 2
+}
+
+// Τοπική ημερομηνία ενός ISO → UTC timestamp της ημέρας (00:00), ή null.
+function dayStamp(iso) {
+  if (!iso) return null
+  const d = new Date(iso)
+  if (isNaN(d)) return null
+  return Date.UTC(d.getFullYear(), d.getMonth(), d.getDate())
+}
+
+// Μήνες (0-based) που ακουμπά το ημιάνοικτο διάστημα [start, end).
+// Αν start === end, μετράει μόνο η ημέρα εγγραφής (φοίτηση 0 ημερών).
+function monthsOfSpan(startStamp, endStamp) {
+  if (startStamp == null || endStamp == null || startStamp > endStamp) return []
+  const last = startStamp === endStamp ? startStamp : endStamp - 86400000
+  const months = []
+  let y = new Date(startStamp).getUTCFullYear()
+  let m = new Date(startStamp).getUTCMonth()
+  const endY = new Date(last).getUTCFullYear()
+  const endM = new Date(last).getUTCMonth()
+  while (y < endY || (y === endY && m <= endM)) {
+    months.push({ y, m })
+    m += 1
+    if (m === 12) {
+      m = 0
+      y += 1
+    }
+  }
+  return months
+}
+
+// Ημέρες του [start, end) που πέφτουν μέσα στο [winStart, winEnd).
+// Μηδέν μόνο όταν η εγγραφή και η λήξη είναι η ίδια ημέρα μέσα στο παράθυρο.
+function overlapDays(startStamp, endStamp, winStart, winEnd) {
+  if (startStamp == null || endStamp == null || startStamp > endStamp) return null
+  const lo = Math.max(startStamp, winStart)
+  const hi = Math.min(endStamp, winEnd)
+  if (lo > hi) return null
+  const days = Math.round((hi - lo) / 86400000)
+  if (days > 0) return days
+  if (startStamp === endStamp && startStamp >= winStart && startStamp < winEnd) return 0
+  return null
+}
 function addCount(c, g) {
   c[g] += 1
   c.total += 1
@@ -2476,12 +2530,13 @@ ipcMain.handle('stats:observatory', (_e, period) => {
     schoolMap.get(key).total += 1
   }
 
-  // Διαγραφές ΜΕΣΑ στην περίοδο (βάσει deleted_at) — ΟΛΕΣ, ανεξάρτητα από το πότε έγινε η εγγραφή.
-  // Ομαδοποίηση ανά βαθμίδα & σχολείο (ίδια δομή με τις εγγραφές).
+  // Διαγραφές ΜΕΣΑ στην περίοδο — μόνο όσοι ήταν εγγεγραμμένοι (Διαγραφές → Μαθητές).
+  // Οι διαγραμμένες αφίξεις δεν μετράνε στο Παρατηρητήριο.
   const delRows = db.query(
     `SELECT s.computed_type, sc.id AS school_id, sc.name AS school_name, sc.type AS school_type
        FROM students s LEFT JOIN schools sc ON sc.id = s.school_id
-      WHERE s.status = 'deleted' AND s.deleted_at >= $start AND s.deleted_at < $end`,
+      WHERE s.status = 'deleted' AND s.prev_status = 'enrolled'
+        AND s.deleted_at >= $start AND s.deleted_at < $end`,
     { $start: startIso, $end: endIso }
   )
   const delLevelTotals = { 'Πρωτοβάθμια': 0, 'Δευτεροβάθμια': 0, 'Άλλο': 0 }
@@ -2560,6 +2615,74 @@ ipcMain.handle('stats:observatory', (_e, period) => {
     return a.name.localeCompare(b.name, 'el')
   })
 
+  // Χρόνος φοίτησης ανά σχολείο, ανεξάρτητος από το 15νθήμερο.
+  // «all»: ολόκληρο το διάστημα εγγραφής→διαγραφή (ή σήμερα). Κάθε μήνας: μόνο οι ημέρες
+  // που πέφτουν μέσα του. Οι αφίξεις που δεν εγγράφηκαν ποτέ δεν μετράνε.
+  const attendRows = db.query(
+    `SELECT s.enrolled_at, s.deleted_at, s.status,
+            sc.id AS school_id, sc.name AS school_name, sc.type AS school_type
+       FROM students s LEFT JOIN schools sc ON sc.id = s.school_id
+      WHERE s.enrolled_at IS NOT NULL AND s.enrolled_at != ''
+        AND (s.status = 'enrolled'
+             OR (s.status = 'deleted' AND s.prev_status = 'enrolled'))`
+  )
+  const todayIso = new Date().toISOString()
+  const periodMaps = new Map() // periodKey → Map(schoolKey → { name, type, days })
+  function addAttendDays(periodKey, schoolKey, name, type, days) {
+    if (!periodMaps.has(periodKey)) periodMaps.set(periodKey, new Map())
+    const schools = periodMaps.get(periodKey)
+    if (!schools.has(schoolKey)) schools.set(schoolKey, { name, type, days: [] })
+    schools.get(schoolKey).days.push(days)
+  }
+  for (const s of attendRows) {
+    const start = dayStamp(s.enrolled_at)
+    const end = dayStamp(s.status === 'enrolled' ? todayIso : s.deleted_at)
+    if (start == null || end == null || start > end) continue
+    const schoolKey = s.school_id != null ? `id:${s.school_id}` : 'none'
+    const name = s.school_id != null ? s.school_name : 'Χωρίς σχολείο'
+    const type = s.school_id != null ? s.school_type : ''
+    addAttendDays('all', schoolKey, name, type, Math.round((end - start) / 86400000))
+    for (const { y, m } of monthsOfSpan(start, end)) {
+      const winStart = Date.UTC(y, m, 1)
+      const winEnd = Date.UTC(y, m + 1, 1)
+      const days = overlapDays(start, end, winStart, winEnd)
+      if (days == null) continue
+      const key = `${y}-${String(m + 1).padStart(2, '0')}`
+      addAttendDays(key, schoolKey, name, type, days)
+    }
+  }
+  const summarizeDays = (days) => ({
+    count: days.length,
+    meanDays: meanOf(days),
+    medianDays: medianOf(days),
+  })
+  const sortSchools = (a, b) => {
+    if (a.type === '' && b.type !== '') return 1
+    if (b.type === '' && a.type !== '') return -1
+    const ta = TYPE_RANK[a.type] || 99
+    const tb = TYPE_RANK[b.type] || 99
+    if (ta !== tb) return ta - tb
+    return a.name.localeCompare(b.name, 'el')
+  }
+  function packAttendance(schoolMap) {
+    const schools = [...schoolMap.values()].sort(sortSchools)
+    const allDays = schools.flatMap((x) => x.days)
+    return {
+      bySchool: schools.map((x) => ({ name: x.name, type: x.type, ...summarizeDays(x.days) })),
+      overall: summarizeDays(allDays),
+    }
+  }
+  const attendanceByPeriod = {}
+  for (const [key, schoolMap] of periodMaps) attendanceByPeriod[key] = packAttendance(schoolMap)
+  const attendanceMonths = [...periodMaps.keys()]
+    .filter((key) => key !== 'all')
+    .sort((a, b) => (a < b ? 1 : a > b ? -1 : 0))
+    .map((key) => {
+      const [y, m] = key.split('-').map(Number)
+      return { key, label: `${GREEK_MONTHS[m - 1]} ${y}` }
+    })
+  const attendanceAll = attendanceByPeriod.all || { bySchool: [], overall: summarizeDays([]) }
+
   return {
     year,
     month,
@@ -2579,6 +2702,10 @@ ipcMain.handle('stats:observatory', (_e, period) => {
     activeEnrolled: activeRows.length,
     dropoutTotal: dropRows.length,
     dropoutReasons,
+    attendanceBySchool: attendanceAll.bySchool,
+    attendanceOverall: attendanceAll.overall,
+    attendanceMonths,
+    attendanceByPeriod,
   }
 })
 

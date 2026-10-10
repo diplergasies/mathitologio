@@ -6,8 +6,17 @@ import DeleteReasonModal from '../components/DeleteReasonModal'
 import FyloCell from '../components/FyloCell'
 import { useSelection } from '../useSelection'
 import { useConfirm } from '../components/ConfirmProvider'
-import { Undo2, Users, Trash2, Pencil } from 'lucide-react'
+import { Undo2, Users, Trash2 } from 'lucide-react'
 import { isoToDMY } from '../calendarUtils'
+
+// Αρχή του λόγου (έως 2 λέξεις)· αν περισσεύει κείμενο, προστίθενται «...».
+function shortReason(reason) {
+  const text = String(reason || '').trim()
+  if (!text) return ''
+  const words = text.split(/\s+/).filter(Boolean)
+  if (words.length <= 2) return words.join(' ')
+  return `${words.slice(0, 2).join(' ')}...`
+}
 
 function fmtDeleted(iso) {
   if (!iso) return '—'
@@ -22,6 +31,7 @@ export default function Deletions({ version, bump, showToast }) {
   const [students, setStudents] = useState([])
   const [reasonFor, setReasonFor] = useState(null)
   const [noteFor, setNoteFor] = useState(null)
+  const [sub, setSub] = useState('students') // προεπιλογή: διαγραμμένοι από τους Μαθητές
   const sel = useSelection()
 
   const notifyError = (m) => showToast && showToast(m, 'error')
@@ -53,7 +63,7 @@ export default function Deletions({ version, bump, showToast }) {
     bump()
   }
 
-  const columns = [
+  const baseColumns = [
     { key: 'eponymo', label: 'Επώνυμο', editable: true },
     { key: 'onoma', label: 'Όνομα', editable: true },
     { key: 'patronymo', label: 'Πατρώνυμο', editable: true },
@@ -62,35 +72,66 @@ export default function Deletions({ version, bump, showToast }) {
     { key: 'fylo', label: 'Φύλο', render: (s) => <FyloCell student={s} onChanged={bump} onError={notifyError} /> },
     { key: 'ithageneia', label: 'Ιθαγένεια', editable: true },
     { key: 'imerominia_gennisis', label: 'Ημ. γέννησης', editable: true },
+  ]
+  const deletionDateCol = {
+    key: 'deleted_at',
+    label: 'Ημ. διαγραφής',
+    editable: true,
+    render: (s) => fmtDeleted(s.deleted_at),
+    editAccessor: (s) => isoToDMY(s.deleted_at),
+  }
+  const studentColumns = [
+    ...baseColumns,
     { key: 'school_name', label: 'Σχολείο' },
     { key: 'current_grade', label: 'Τάξη', editable: true },
     {
-      key: 'deleted_at',
-      label: 'Ημ. διαγραφής',
+      key: 'enrolled_at',
+      label: 'Ημ. εγγραφής',
       editable: true,
-      render: (s) => fmtDeleted(s.deleted_at),
-      editAccessor: (s) => isoToDMY(s.deleted_at),
+      sortable: true,
+      sortAccessor: (s) => {
+        const t = s.enrolled_at ? new Date(s.enrolled_at).getTime() : NaN
+        return Number.isFinite(t) ? t : null
+      },
+      render: (s) => isoToDMY(s.enrolled_at) || '—',
+      editAccessor: (s) => isoToDMY(s.enrolled_at),
     },
+    deletionDateCol,
     {
       key: 'deletion_reason',
       label: 'Λόγος διαγραφής',
       render: (s) => (
         <button
           onClick={() => setReasonFor(s)}
-          title="Αλλαγή λόγου διαγραφής"
-          className="inline-flex items-center gap-1 text-left text-slate-600 hover:text-blue-600"
+          title={s.deletion_reason || 'Αλλαγή λόγου διαγραφής'}
+          className="text-left text-slate-600 hover:text-blue-600"
         >
-          <span className={s.deletion_reason ? '' : 'text-slate-300'}>{s.deletion_reason || '—'}</span>
-          <Pencil size={12} className="text-slate-400" />
+          <span className={s.deletion_reason ? '' : 'text-slate-300'}>
+            {shortReason(s.deletion_reason) || '—'}
+          </span>
         </button>
       ),
     },
-    {
-      key: 'prev_status',
-      label: 'Επιστροφή σε',
-      render: (s) => (s.prev_status === 'enrolled' ? 'Μαθητές' : 'Αφίξεις'),
-    },
   ]
+  const arrivalColumns = [
+    ...baseColumns,
+    { key: 'current_grade', label: 'Τάξη', editable: true },
+    { key: 'imerominia_afixis', label: 'Ημ. άφιξης', editable: true },
+    deletionDateCol,
+  ]
+
+  const isStudents = sub === 'students'
+  const visible = students.filter((s) =>
+    isStudents ? s.prev_status === 'enrolled' : s.prev_status !== 'enrolled'
+  )
+  const studentCount = students.filter((s) => s.prev_status === 'enrolled').length
+  const arrivalCount = students.length - studentCount
+
+  function chooseSub(id) {
+    setSub(id)
+    sel.clear()
+    setReasonFor(null)
+  }
 
   function load() {
     api.listStudents('deleted').then((r) => setStudents(r || []))
@@ -135,7 +176,27 @@ export default function Deletions({ version, bump, showToast }) {
 
   return (
     <div>
-      <div className="mb-3 text-sm text-slate-500">{students.length} διαγραμμένοι</div>
+      <div className="mb-3 flex flex-wrap items-end justify-between gap-3">
+        <div className="flex gap-1 border-b border-slate-200">
+          {[
+            { id: 'students', label: 'Μαθητές', count: studentCount },
+            { id: 'arrivals', label: 'Αφίξεις', count: arrivalCount },
+          ].map((t) => (
+            <button
+              key={t.id}
+              onClick={() => chooseSub(t.id)}
+              className={`-mb-px border-b-2 px-3 py-2 text-sm font-medium ${
+                sub === t.id
+                  ? 'border-blue-600 text-blue-700'
+                  : 'border-transparent text-slate-500 hover:border-slate-300 hover:text-slate-700'
+              }`}
+            >
+              {t.label}
+              <span className="ml-1.5 text-xs font-normal text-slate-400">{t.count}</span>
+            </button>
+          ))}
+        </div>
+      </div>
 
       {sel.ids.length > 0 && (
         <div className="mb-3 flex items-center gap-2 rounded-lg border border-blue-200 bg-blue-50 px-3 py-2 text-sm">
@@ -159,10 +220,11 @@ export default function Deletions({ version, bump, showToast }) {
       )}
 
       <StudentTable
-        students={students}
-        columns={columns}
-        tableId="deletions"
-        emptyText="Καμία διαγραφή."
+        key={sub}
+        students={visible}
+        columns={isStudents ? studentColumns : arrivalColumns}
+        tableId={isStudents ? 'deletions-students' : 'deletions-arrivals'}
+        emptyText={isStudents ? 'Κανένας διαγραμμένος μαθητής.' : 'Καμία διαγραμμένη άφιξη.'}
         searchable
         selectable
         selectedIds={sel.ids}
