@@ -5,6 +5,11 @@
 Η μορφή ακολουθεί το [Keep a Changelog](https://keepachangelog.com/el/1.1.0/),
 και οι εκδόσεις το [Semantic Versioning](https://semver.org/lang/el/).
 
+## [2.19.1] — 2026-10-10
+
+### Αλλαγές
+- Source-Available LICENSE στο αποθετήριο· EULA στον φάκελο εγκατάστασης (χωρίς οθόνη στον installer).
+
 ## [2.19.0] — 2026-10-10
 
 ### Προσθήκες
